@@ -10,14 +10,20 @@ function usage() {
 Usage:
   xcdev list devices [all|sim|real]
   xcdev list profiles
-  xcdev build [profile]
-  xcdev run [profile]
+  xcdev set sim <simulator-name>
+  xcdev set real <device-name-pattern>
+  xcdev build [profile] [target]
+  xcdev run [profile] [target]
 
 Examples:
   xcdev list devices
   xcdev list devices sim
+  xcdev set sim "iPhone Air"
+  xcdev set real "Huawei Air"
   xcdev build sim
   xcdev run real
+  xcdev run real "Huawei Air"
+  xcdev run "Huawei Air"
 
 Config:
   Reads .ios-dev.env from current working directory by default.
@@ -44,6 +50,35 @@ function parseEnvFile(filePath) {
     out[key] = value;
   }
   return out;
+}
+
+function escapeRegExp(input) {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function quoteEnvValue(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function upsertEnvEntries(filePath, entries) {
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : "";
+  const lines = existing ? existing.split(/\r?\n/) : [];
+  if (lines.length === 1 && lines[0] === "") lines.length = 0;
+
+  for (const [key, rawValue] of Object.entries(entries)) {
+    const value = quoteEnvValue(rawValue);
+    const nextLine = `${key}=${value}`;
+    const keyRe = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+    const idx = lines.findIndex((line) => !line.trim().startsWith("#") && keyRe.test(line));
+    if (idx >= 0) {
+      lines[idx] = nextLine;
+    } else {
+      lines.push(nextLine);
+    }
+  }
+
+  const output = `${lines.join("\n").replace(/\n+$/g, "")}\n`;
+  fs.writeFileSync(filePath, output, "utf8");
 }
 
 function findUp(startDir, checkFn) {
@@ -98,7 +133,7 @@ function resolveProfile(config, profile) {
       target = target || process.env.IOS_SIM_NAME || config.IOS_SIM_NAME || "iPhone 17";
     } else if (profile === "real") {
       mode = mode || "real";
-      target = target || process.env.IOS_DEVICE_NAME_PATTERN || config.IOS_DEVICE_NAME_PATTERN || "iPhone";
+      target = target || process.env.IOS_DEVICE_NAME_PATTERN || config.IOS_DEVICE_NAME_PATTERN || ".*";
     }
   }
 
@@ -220,18 +255,63 @@ function listProfiles(config) {
   }
   if (profiles.length === 0) {
     profiles.push({ profile: "sim", mode: "sim", target: "iPhone" });
-    profiles.push({ profile: "real", mode: "real", target: "iPhone" });
+    profiles.push({ profile: "real", mode: "real", target: ".*" });
   }
   profiles.sort((a, b) => a.profile.localeCompare(b.profile));
   console.log(`default: ${(config.IOS_PROFILE_DEFAULT || "sim").toLowerCase()}`);
   printTable(["profile", "mode", "target"], profiles);
 }
 
-function runBuildOrRun(action, profile, workDir, configPath, config) {
+function setTarget(kind, value, configPath) {
+  const target = (value || "").trim();
+  if (!target) {
+    throw new Error(`Usage: xcdev set ${kind} "<name>"`);
+  }
+
+  if (kind === "sim") {
+    upsertEnvEntries(configPath, {
+      IOS_SIM_NAME: target,
+      IOS_PROFILE_SIM_MODE: "sim",
+      IOS_PROFILE_SIM_TARGET: target
+    });
+  } else if (kind === "real") {
+    upsertEnvEntries(configPath, {
+      IOS_DEVICE_NAME_PATTERN: target,
+      IOS_PROFILE_REAL_MODE: "real",
+      IOS_PROFILE_REAL_TARGET: target
+    });
+  } else {
+    throw new Error(`Invalid set target: ${kind}`);
+  }
+
+  console.log(`Saved ${kind} target '${target}' to ${configPath}`);
+}
+
+function hasConfiguredProfile(config, profile) {
+  const key = normalizeProfileKey(profile);
+  return Boolean(config[`IOS_PROFILE_${key}_MODE`] || config[`IOS_PROFILE_${key}_TARGET`]);
+}
+
+function parseBuildRunArgs(args, config) {
+  if (args.length === 0) return { profile: "", target: "" };
+  if (args.length === 1) return { profile: args[0], target: "" };
+
+  const first = (args[0] || "").toLowerCase();
+  const rest = args.slice(1).join(" ").trim();
+  if (first === "sim" || first === "real" || hasConfiguredProfile(config, first)) {
+    return { profile: first, target: rest };
+  }
+
+  // Treat unrecognized multi-word args as a real-device name pattern.
+  return { profile: "real", target: args.join(" ").trim() };
+}
+
+function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config) {
   const resolvedProfile =
     profile || process.env.IOS_PROFILE_DEFAULT || config.IOS_PROFILE_DEFAULT || "sim";
   const { mode, target } = resolveProfile(config, resolvedProfile.toLowerCase());
-  if (!mode || !target) {
+  const finalTarget = targetOverride || target;
+  if (!mode || !finalTarget) {
     throw new Error(`Profile '${resolvedProfile}' is not configured in ${configPath}`);
   }
 
@@ -245,7 +325,7 @@ function runBuildOrRun(action, profile, workDir, configPath, config) {
     IOS_WORKDIR: workDir,
     IOS_DEV_CONFIG: configPath
   };
-  const res = spawnSync("bash", [scriptPath, mode, action, target], {
+  const res = spawnSync("bash", [scriptPath, mode, action, finalTarget], {
     stdio: "inherit",
     cwd: workDir,
     env
@@ -278,8 +358,19 @@ function main() {
     throw new Error(`Unknown list subcommand: ${sub}`);
   }
 
+  if (cmd === "set") {
+    const kind = (argv[1] || "").toLowerCase();
+    if (kind !== "sim" && kind !== "real") {
+      throw new Error("Usage: xcdev set <sim|real> \"<name>\"");
+    }
+    const value = argv.slice(2).join(" ");
+    setTarget(kind, value, configPath);
+    return;
+  }
+
   if (cmd === "build" || cmd === "run") {
-    runBuildOrRun(cmd, argv[1], workDir, configPath, config);
+    const { profile, target } = parseBuildRunArgs(argv.slice(1), config);
+    runBuildOrRun(cmd, profile, target, workDir, configPath, config);
     return;
   }
 

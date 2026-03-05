@@ -86,7 +86,7 @@ CONFIGURATION="${IOS_CONFIGURATION:-Debug}"
 ENABLE_DEBUG_DYLIB="${IOS_ENABLE_DEBUG_DYLIB:-NO}"
 BUNDLE_ID_OVERRIDE="${IOS_BUNDLE_ID:-}"
 SIM_NAME="${IOS_SIM_NAME:-iPhone 17}"
-DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-iPhone}"
+DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
 
 if [[ -n "$TARGET_VALUE" ]]; then
   if [[ "$MODE" == "sim" ]]; then
@@ -211,7 +211,7 @@ run_on_real_device() {
   local udid app_path bundle_id
   udid="$(find_connected_device_udid)"
   if [[ -z "${udid:-}" ]]; then
-    echo "No connected real iPhone matching pattern '$DEVICE_NAME_PATTERN' found."
+    echo "No connected real device matching pattern '$DEVICE_NAME_PATTERN' found."
     exit 1
   fi
 

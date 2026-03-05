@@ -19,6 +19,8 @@ xcdev list devices
 xcdev list devices sim
 xcdev list devices real
 xcdev list profiles
+xcdev set sim "iPhone Air"
+xcdev set real "Huawei Air"
 
 xcdev build sim
 xcdev build real
@@ -29,6 +31,7 @@ xcdev run real
 
 `sim` / `real` are recommended default profiles.
 Any profile name (such as `air`, `office-phone`) is user-defined in `.ios-dev.env`.
+If `real` target is not set, xcdev uses the first connected real device.
 
 ## Project Config
 
