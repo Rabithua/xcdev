@@ -12,18 +12,31 @@ npm whoami
 npm config get registry
 ```
 
-2. Run local checks:
+2. Use release script (recommended):
 
 ```bash
-npm run check
-npm run publish:dry-run
+npm run release:patch
+# or: npm run release:minor
+# or: npm run release:major
 ```
 
-3. Publish:
+Optional flags:
 
 ```bash
-npm run publish:npm
+bash ./scripts/release.sh patch --otp 123456
+bash ./scripts/release.sh patch --commit-message "feat: improve release flow"
+bash ./scripts/release.sh patch --skip-publish
 ```
+
+3. What script does:
+
+- run on `main`
+- run `npm run check`
+- run `npm run publish:dry-run`
+- auto commit local changes (`git add -A` + `git commit`)
+- run `npm version <bump>`
+- push `main` and tags to GitHub
+- publish to npm (`--access public`)
 
 Notes:
 

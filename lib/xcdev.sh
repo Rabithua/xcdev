@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="${IOS_WORKDIR:-$SCRIPT_ROOT}"
-CONFIG_FILE="${IOS_DEV_CONFIG:-$ROOT_DIR/.ios-dev.env}"
+CONFIG_FILE="${IOS_DEV_CONFIG:-$ROOT_DIR/.xcdev.env}"
 
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -78,7 +78,7 @@ find_default_scheme() {
 
 SCHEME="${IOS_SCHEME:-$(find_default_scheme)}"
 if [[ -z "${SCHEME:-}" ]]; then
-  echo "No scheme found. Set IOS_SCHEME in .ios-dev.env."
+  echo "No scheme found. Set IOS_SCHEME in .xcdev.env."
   exit 1
 fi
 
@@ -208,11 +208,39 @@ run_on_real_device() {
       '
   }
 
+  find_first_connected_device_udid() {
+    xcrun xctrace list devices |
+      awk '
+        BEGIN { in_offline = 0 }
+        $0 == "== Devices Offline ==" { in_offline = 1; next }
+        $0 == "== Simulators ==" { exit }
+        in_offline { next }
+        $0 ~ /MacBook/ || $0 ~ /Simulator/ { next }
+        {
+          line = $0
+          while (match(line, /\(([A-Fa-f0-9-]{8,})\)/)) {
+            udid = substr(line, RSTART + 1, RLENGTH - 2)
+            line = substr(line, RSTART + RLENGTH)
+          }
+          if (udid != "") {
+            print udid
+            exit
+          }
+        }
+      '
+  }
+
   local udid app_path bundle_id
   udid="$(find_connected_device_udid)"
   if [[ -z "${udid:-}" ]]; then
-    echo "No connected real device matching pattern '$DEVICE_NAME_PATTERN' found."
-    exit 1
+    local fallback_udid
+    fallback_udid="$(find_first_connected_device_udid)"
+    if [[ -z "${fallback_udid:-}" ]]; then
+      echo "No connected real device found."
+      exit 1
+    fi
+    echo "No connected real device matching pattern '$DEVICE_NAME_PATTERN'. Fallback to first connected device ($fallback_udid)."
+    udid="$fallback_udid"
   fi
 
   xcodebuild \

@@ -30,18 +30,18 @@ xcdev run real
 ```
 
 `sim` / `real` are recommended default profiles.
-Any profile name (such as `air`, `office-phone`) is user-defined in `.ios-dev.env`.
+Any profile name (such as `air`, `office-phone`) is user-defined in `.xcdev.env`.
 If `real` target is not set, xcdev uses the first connected real device.
 
 ## Project Config
 
-The CLI auto-discovers `.ios-dev.env` by searching upward from current directory.
+The CLI auto-discovers `.xcdev.env` by searching upward from current directory.
 If no config is found, it still works with auto-detected project/scheme and default profiles.
 
-Create `.ios-dev.env` in the project root if you want stable project-specific settings.
+Create `.xcdev.env` in the project root if you want stable project-specific settings.
 You can start from:
 
-`templates/.ios-dev.env.example`
+`templates/.xcdev.env.example`
 
 Required keys:
 
@@ -62,5 +62,5 @@ IOS_PROFILE_SIM_MODE="sim"
 IOS_PROFILE_SIM_TARGET="iPhone"
 
 IOS_PROFILE_REAL_MODE="real"
-IOS_PROFILE_REAL_TARGET="iPhone"
+IOS_PROFILE_REAL_TARGET=".*"
 ```

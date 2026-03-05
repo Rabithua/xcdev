@@ -4,6 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+const PRIMARY_CONFIG_NAME = ".xcdev.env";
+
 function usage() {
   console.log(`xcdev
 
@@ -26,7 +28,7 @@ Examples:
   xcdev run "Huawei Air"
 
 Config:
-  Reads .ios-dev.env from current working directory by default.
+  Reads .xcdev.env from current working directory by default.
 `);
 }
 
@@ -60,10 +62,23 @@ function quoteEnvValue(value) {
   return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+function ensureConfigHeader(lines) {
+  const marker = "# xcdev config";
+  if (lines.some((line) => line.trim() === marker)) return lines;
+  const header = [
+    marker,
+    "# Purpose: local project defaults for xcdev device/profile selection.",
+    "# Created/updated by `xcdev set`.",
+    ""
+  ];
+  return [...header, ...lines];
+}
+
 function upsertEnvEntries(filePath, entries) {
   const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : "";
-  const lines = existing ? existing.split(/\r?\n/) : [];
+  let lines = existing ? existing.split(/\r?\n/) : [];
   if (lines.length === 1 && lines[0] === "") lines.length = 0;
+  lines = ensureConfigHeader(lines);
 
   for (const [key, rawValue] of Object.entries(entries)) {
     const value = quoteEnvValue(rawValue);
@@ -79,6 +94,14 @@ function upsertEnvEntries(filePath, entries) {
 
   const output = `${lines.join("\n").replace(/\n+$/g, "")}\n`;
   fs.writeFileSync(filePath, output, "utf8");
+}
+
+function findConfigInDir(dir) {
+  const primaryPath = path.join(dir, PRIMARY_CONFIG_NAME);
+  if (fs.existsSync(primaryPath)) {
+    return { path: primaryPath, name: PRIMARY_CONFIG_NAME };
+  }
+  return null;
 }
 
 function findUp(startDir, checkFn) {
@@ -105,14 +128,16 @@ function hasXcodeContainer(dir) {
 }
 
 function discoverContext(startDir) {
-  const configDir = findUp(startDir, (dir) => fs.existsSync(path.join(dir, ".ios-dev.env")));
+  const configDir = findUp(startDir, (dir) => Boolean(findConfigInDir(dir)));
   const projectDir = findUp(startDir, hasXcodeContainer);
 
   const workDir = projectDir || configDir || path.resolve(startDir);
-  const configPath =
-    process.env.IOS_DEV_CONFIG || (configDir ? path.join(configDir, ".ios-dev.env") : path.join(workDir, ".ios-dev.env"));
+  const discoveredConfig = configDir ? findConfigInDir(configDir) : null;
+  const configBaseDir = configDir || workDir;
+  const preferredConfigPath = path.join(configBaseDir, PRIMARY_CONFIG_NAME);
+  const configPath = process.env.IOS_DEV_CONFIG || (discoveredConfig ? discoveredConfig.path : preferredConfigPath);
 
-  return { workDir, configPath };
+  return { workDir, configPath, preferredConfigPath };
 }
 
 function normalizeProfileKey(profile) {
@@ -262,20 +287,22 @@ function listProfiles(config) {
   printTable(["profile", "mode", "target"], profiles);
 }
 
-function setTarget(kind, value, configPath) {
+function setTarget(kind, value, configPath, preferredConfigPath) {
   const target = (value || "").trim();
   if (!target) {
     throw new Error(`Usage: xcdev set ${kind} "<name>"`);
   }
 
+  const writePath = process.env.IOS_DEV_CONFIG ? configPath : preferredConfigPath;
+
   if (kind === "sim") {
-    upsertEnvEntries(configPath, {
+    upsertEnvEntries(writePath, {
       IOS_SIM_NAME: target,
       IOS_PROFILE_SIM_MODE: "sim",
       IOS_PROFILE_SIM_TARGET: target
     });
   } else if (kind === "real") {
-    upsertEnvEntries(configPath, {
+    upsertEnvEntries(writePath, {
       IOS_DEVICE_NAME_PATTERN: target,
       IOS_PROFILE_REAL_MODE: "real",
       IOS_PROFILE_REAL_TARGET: target
@@ -284,7 +311,7 @@ function setTarget(kind, value, configPath) {
     throw new Error(`Invalid set target: ${kind}`);
   }
 
-  console.log(`Saved ${kind} target '${target}' to ${configPath}`);
+  console.log(`Saved ${kind} target '${target}' to ${writePath}`);
 }
 
 function hasConfiguredProfile(config, profile) {
@@ -341,7 +368,7 @@ function main() {
   }
 
   const cwd = process.cwd();
-  const { workDir, configPath } = discoverContext(cwd);
+  const { workDir, configPath, preferredConfigPath } = discoverContext(cwd);
   const config = parseEnvFile(configPath);
 
   const cmd = argv[0];
@@ -364,7 +391,7 @@ function main() {
       throw new Error("Usage: xcdev set <sim|real> \"<name>\"");
     }
     const value = argv.slice(2).join(" ");
-    setTarget(kind, value, configPath);
+    setTarget(kind, value, configPath, preferredConfigPath);
     return;
   }
 
