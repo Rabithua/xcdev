@@ -1,6 +1,6 @@
 {
   "name": "@rabithua/xcdev",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Reusable iOS CLI for listing devices and building/running Xcode projects",
   "license": "MIT",
   "bin": {
