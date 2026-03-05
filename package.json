@@ -1,0 +1,30 @@
+{
+  "name": "@rabithua/xcdev",
+  "version": "1.0.0",
+  "description": "Reusable iOS CLI for listing devices and building/running Xcode projects",
+  "license": "MIT",
+  "bin": {
+    "xcdev": "bin/xcdev.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node ./bin/xcdev.js --help",
+    "publish:dry-run": "npm publish --dry-run --access public",
+    "publish:npm": "npm publish --access public"
+  },
+  "keywords": [
+    "ios",
+    "xcodebuild",
+    "simulator",
+    "cli"
+  ]
+}
