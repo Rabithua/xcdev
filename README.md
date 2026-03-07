@@ -21,20 +21,37 @@ npm install -g @rabithua/xcdev
 
 ## Commands
 
-```bash
-xcdev list devices
-xcdev list devices sim
-xcdev list devices real
-xcdev list profiles
-xcdev set sim "iPhone Air"
-xcdev set real "Huawei Air"
+The `xcdev` CLI offers the following commands for managing devices and building/running your iOS project.
 
-xcdev build sim
-xcdev build real
+### Listing Devices and Profiles
 
-xcdev run sim
-xcdev run real
-```
+- `xcdev list devices`: Lists all available simulator and connected real devices.
+- `xcdev list devices sim`: Lists only the available iOS simulators.
+- `xcdev list devices real`: Lists only the currently connected real iOS devices.
+- `xcdev list profiles`: Displays all the device profiles (e.g., specific simulators or real devices) that you have defined or are available as defaults.
+
+### Setting Default Targets
+
+You can assign a specific device name or pattern to your default `sim` and `real` profiles. This is useful for quickly targeting a preferred device.
+
+- `xcdev set sim "iPhone Air"`: Sets the default simulator profile target to a simulator named "iPhone Air".
+- `xcdev set real "Huawei Air"`: Sets the default real device profile target to a connected device matching "Huawei Air".
+
+### Building the Project
+
+Builds the project for the specified profile without installing or running it.
+
+- `xcdev build sim`: Compiles the project targeting the default simulator.
+- `xcdev build real`: Compiles the project targeting the default connected real device.
+
+### Running the Project
+
+Builds (if necessary), installs, and launches the app on the target device.
+
+- `xcdev run sim`: Runs your application on the default simulator. If the simulator is not booted, it will attempt to start it.
+- `xcdev run real`: Runs your application on the default real device.
+
+*(Note: `sim` and `real` are recommended default profile names. Any custom profile name, such as `office-phone`, can be used if defined in `.xcdev.env`.)*
 
 `sim` / `real` are recommended default profiles.
 Any profile name (such as `air`, `office-phone`) is user-defined in `.xcdev.env`.
