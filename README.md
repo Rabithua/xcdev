@@ -6,6 +6,13 @@ A publishable npm CLI for:
 - building iOS projects with profiles
 - running apps on simulator or real device
 
+## Prerequisites
+
+- **OS**: macOS
+- **Node.js**: >= 18
+- **Xcode**: 15 or higher (relies on `xcodebuild`, `xcrun simctl`, `xcrun xctrace`, and `xcrun devicectl`).
+- **Project**: A valid iOS project (`.xcodeproj` or `.xcworkspace`) with a buildable scheme.
+
 ## Install
 
 ```bash
