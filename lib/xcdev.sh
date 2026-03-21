@@ -186,8 +186,14 @@ run_on_simulator() {
 }
 
 run_on_real_device() {
+  xctrace_devices_output() {
+    xcrun xctrace list devices
+  }
+
   find_connected_device_udid() {
-    xcrun xctrace list devices |
+    local devices_output
+    devices_output="$(xctrace_devices_output)"
+    printf '%s\n' "$devices_output" |
       awk -v pattern="$DEVICE_NAME_PATTERN" '
         BEGIN { in_offline = 0 }
         $0 == "== Devices Offline ==" { in_offline = 1; next }
@@ -209,7 +215,9 @@ run_on_real_device() {
   }
 
   find_first_connected_device_udid() {
-    xcrun xctrace list devices |
+    local devices_output
+    devices_output="$(xctrace_devices_output)"
+    printf '%s\n' "$devices_output" |
       awk '
         BEGIN { in_offline = 0 }
         $0 == "== Devices Offline ==" { in_offline = 1; next }
