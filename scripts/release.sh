@@ -88,9 +88,6 @@ fi
 echo "==> npm run check"
 npm run check
 
-echo "==> npm run publish:dry-run"
-npm run publish:dry-run
-
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "==> git add -A"
   git add -A
@@ -104,10 +101,12 @@ npm version "$BUMP"
 NEW_VERSION="$(node -p "require('./package.json').version")"
 echo "New version: $NEW_VERSION"
 
-echo "==> git push origin main --follow-tags"
-git push origin main --follow-tags
+echo "==> npm run publish:dry-run"
+npm run publish:dry-run
 
 if [[ "$SKIP_PUBLISH" == "1" ]]; then
+  echo "==> git push origin main --follow-tags"
+  git push origin main --follow-tags
   echo "Skip npm publish enabled. Release commit/tag pushed, package not published."
   exit 0
 fi
@@ -118,5 +117,8 @@ if [[ -n "$OTP" ]]; then
 else
   npm publish --access public
 fi
+
+echo "==> git push origin main --follow-tags"
+git push origin main --follow-tags
 
 echo "Release completed: @rabithua/xcdev@$NEW_VERSION"
