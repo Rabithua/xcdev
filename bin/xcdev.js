@@ -15,7 +15,7 @@ Usage:
   xcdev set sim <simulator-name>
   xcdev set real <device-name-pattern>
   xcdev build [profile] [target]
-  xcdev run [profile] [target]
+  xcdev run [--no-open-simulator] [profile] [target]
 
 Examples:
   xcdev list devices
@@ -23,6 +23,8 @@ Examples:
   xcdev set sim "iPhone Air"
   xcdev set real "Huawei Air"
   xcdev build sim
+  xcdev run sim
+  xcdev run --no-open-simulator sim
   xcdev run real
   xcdev run real "Huawei Air"
   xcdev run "Huawei Air"
@@ -333,7 +335,22 @@ function parseBuildRunArgs(args, config) {
   return { profile: "real", target: args.join(" ").trim() };
 }
 
-function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config) {
+function parseBuildRunOptions(args) {
+  const positional = [];
+  let openSimulator = true;
+
+  for (const arg of args) {
+    if (arg === "--no-open-simulator") {
+      openSimulator = false;
+      continue;
+    }
+    positional.push(arg);
+  }
+
+  return { positional, openSimulator };
+}
+
+function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config, options = {}) {
   const resolvedProfile =
     profile || process.env.IOS_PROFILE_DEFAULT || config.IOS_PROFILE_DEFAULT || "sim";
   const { mode, target } = resolveProfile(config, resolvedProfile.toLowerCase());
@@ -350,7 +367,11 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
   const env = {
     ...process.env,
     IOS_WORKDIR: workDir,
-    IOS_DEV_CONFIG: configPath
+    IOS_DEV_CONFIG: configPath,
+    IOS_OPEN_SIMULATOR:
+      options.openSimulator === false
+        ? "NO"
+        : process.env.IOS_OPEN_SIMULATOR || config.IOS_OPEN_SIMULATOR || "YES"
   };
   const res = spawnSync("bash", [scriptPath, mode, action, finalTarget], {
     stdio: "inherit",
@@ -396,8 +417,9 @@ function main() {
   }
 
   if (cmd === "build" || cmd === "run") {
-    const { profile, target } = parseBuildRunArgs(argv.slice(1), config);
-    runBuildOrRun(cmd, profile, target, workDir, configPath, config);
+    const options = parseBuildRunOptions(argv.slice(1));
+    const { profile, target } = parseBuildRunArgs(options.positional, config);
+    runBuildOrRun(cmd, profile, target, workDir, configPath, config, options);
     return;
   }
 

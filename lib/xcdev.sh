@@ -87,6 +87,7 @@ ENABLE_DEBUG_DYLIB="${IOS_ENABLE_DEBUG_DYLIB:-NO}"
 BUNDLE_ID_OVERRIDE="${IOS_BUNDLE_ID:-}"
 SIM_NAME="${IOS_SIM_NAME:-iPhone 17}"
 DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
+OPEN_SIMULATOR="${IOS_OPEN_SIMULATOR:-YES}"
 
 if [[ -n "$TARGET_VALUE" ]]; then
   if [[ "$MODE" == "sim" ]]; then
@@ -123,6 +124,12 @@ resolve_bundle_id_from_plist() {
   /usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$app_path/Info.plist" 2>/dev/null || true
 }
 
+open_simulator_app() {
+  local udid="$1"
+  open -a Simulator --args -CurrentDeviceUDID "$udid" >/dev/null 2>&1 ||
+    open -a Simulator >/dev/null 2>&1 || true
+}
+
 run_on_simulator() {
   find_booted_udid() {
     xcrun simctl list devices booted |
@@ -146,6 +153,11 @@ run_on_simulator() {
       exit 1
     fi
     xcrun simctl boot "$udid" || true
+    xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || true
+  fi
+
+  if [[ "$ACTION" == "run" && "$OPEN_SIMULATOR" == "YES" ]]; then
+    open_simulator_app "$udid"
   fi
 
   xcodebuild \

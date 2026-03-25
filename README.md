@@ -48,8 +48,10 @@ Builds the project for the specified profile without installing or running it.
 
 Builds (if necessary), installs, and launches the app on the target device.
 
-- `xcdev run sim`: Runs your application on the default simulator. If the simulator is not booted, it will attempt to start it.
+- `xcdev run sim`: Runs your application on the default simulator. By default, it boots the simulator and opens `Simulator.app` for the selected device.
 - `xcdev run real`: Runs your application on the default real device.
+
+Use `xcdev run --no-open-simulator sim` if you want to keep the simulator app hidden while still running on the booted device.
 
 *(Note: `sim` and `real` are recommended default profile names. Any custom profile name, such as `office-phone`, can be used if defined in `.xcdev.env`.)*
 
@@ -78,6 +80,7 @@ Common optional keys:
 - `IOS_BUNDLE_ID`
 - `IOS_PROFILE_<NAME>_MODE`
 - `IOS_PROFILE_<NAME>_TARGET`
+- `IOS_OPEN_SIMULATOR` (`YES` by default; set to `NO` to avoid opening `Simulator.app` during `run`)
 
 Example:
 
