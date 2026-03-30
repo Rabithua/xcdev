@@ -31,16 +31,18 @@ bash ./scripts/release.sh patch --skip-publish
 3. What script does:
 
 - run on `main`
+- fetch `origin/main` and stop if local `main` is behind remote
 - run `npm run check`
-- run `npm run publish:dry-run`
 - auto commit local changes (`git add -A` + `git commit`)
 - run `npm version <bump>`
+- run `npm run publish:dry-run`
 - push `main` and tags to GitHub
 - publish to npm (`--access public`)
 
 Notes:
 
 - Package is scoped (`@rabithua/xcdev`), first publish must use `--access public` (already included in script).
+- Release push now happens before npm publish so the Git tag and `main` stay ahead of the registry instead of the other way around.
 - If 2FA is enabled on npm, finish OTP verification during publish.
 
 ## GitHub push

@@ -79,11 +79,34 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+ensure_remote_in_sync() {
+  local counts ahead behind
+
+  echo "==> git fetch origin main --tags"
+  git fetch origin main --tags
+
+  counts="$(git rev-list --left-right --count HEAD...origin/main)"
+  ahead="${counts%%[[:space:]]*}"
+  behind="${counts##*[[:space:]]}"
+
+  if [[ "$behind" != "0" ]]; then
+    echo "Local main is behind origin/main by $behind commit(s)."
+    echo "Pull/rebase the latest remote changes before releasing."
+    exit 1
+  fi
+
+  if [[ "$ahead" != "0" ]]; then
+    echo "Local main is ahead of origin/main by $ahead commit(s). Release will include those commits."
+  fi
+}
+
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$CURRENT_BRANCH" != "main" ]]; then
   echo "Current branch is '$CURRENT_BRANCH'. Release must run on 'main'."
   exit 1
 fi
+
+ensure_remote_in_sync
 
 echo "==> npm run check"
 npm run check
@@ -95,6 +118,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
   git commit -m "$COMMIT_MESSAGE"
 fi
 
+ensure_remote_in_sync
+
 echo "==> npm version $BUMP"
 npm version "$BUMP"
 
@@ -104,9 +129,10 @@ echo "New version: $NEW_VERSION"
 echo "==> npm run publish:dry-run"
 npm run publish:dry-run
 
+echo "==> git push origin main --follow-tags"
+git push origin main --follow-tags
+
 if [[ "$SKIP_PUBLISH" == "1" ]]; then
-  echo "==> git push origin main --follow-tags"
-  git push origin main --follow-tags
   echo "Skip npm publish enabled. Release commit/tag pushed, package not published."
   exit 0
 fi
@@ -117,8 +143,5 @@ if [[ -n "$OTP" ]]; then
 else
   npm publish --access public
 fi
-
-echo "==> git push origin main --follow-tags"
-git push origin main --follow-tags
 
 echo "Release completed: @rabithua/xcdev@$NEW_VERSION"
