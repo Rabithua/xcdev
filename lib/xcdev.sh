@@ -86,6 +86,10 @@ CONFIGURATION="${IOS_CONFIGURATION:-Debug}"
 ENABLE_DEBUG_DYLIB="${IOS_ENABLE_DEBUG_DYLIB:-NO}"
 BUNDLE_ID_OVERRIDE="${IOS_BUNDLE_ID:-}"
 SIM_NAME="${IOS_SIM_NAME:-iPhone 17}"
+SIM_VERSION="${IOS_SIM_VERSION:-}"
+SIM_UDID="${IOS_SIM_UDID:-}"
+SIM_RESOLVED_NAME="${IOS_SIM_RESOLVED_NAME:-}"
+SIM_RUNTIME="${IOS_SIM_RUNTIME:-}"
 DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
 OPEN_SIMULATOR="${IOS_OPEN_SIMULATOR:-YES}"
 
@@ -95,6 +99,10 @@ if [[ -n "$TARGET_VALUE" ]]; then
   else
     DEVICE_NAME_PATTERN="$TARGET_VALUE"
   fi
+fi
+
+if [[ -n "$SIM_RESOLVED_NAME" ]]; then
+  SIM_NAME="$SIM_RESOLVED_NAME"
 fi
 
 TARGET_BUILD_DIR=""
@@ -131,29 +139,14 @@ open_simulator_app() {
 }
 
 run_on_simulator() {
-  find_booted_udid() {
-    xcrun simctl list devices booted |
-      awk -v name="$SIM_NAME" -F '[()]' '$0 ~ name && $0 ~ /Booted/ { print $2; exit }'
-  }
-
-  find_available_udid() {
-    xcrun simctl list devices available |
-      awk -v name="$SIM_NAME" -F '[()]' '
-        $0 ~ name && ($0 ~ /Shutdown/ || $0 ~ /Booted/) { udid = $2 }
-        END { print udid }
-      '
-  }
-
   local udid app_path bundle_id
-  udid="$(find_booted_udid)"
-  if [[ -z "${udid:-}" ]]; then
-    udid="$(find_available_udid)"
-    if [[ -z "${udid:-}" ]]; then
-      echo "No available simulator named '$SIM_NAME' found."
-      exit 1
-    fi
+  udid="$SIM_UDID"
+  if [[ -n "${udid:-}" ]]; then
     xcrun simctl boot "$udid" || true
     xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || true
+  else
+    echo "Simulator UDID is not resolved."
+    exit 1
   fi
 
   if [[ "$ACTION" == "run" && "$OPEN_SIMULATOR" == "YES" ]]; then
@@ -169,7 +162,13 @@ run_on_simulator() {
     build
 
   if [[ "$ACTION" == "build" ]]; then
-    echo "Build completed on $SIM_NAME ($udid)."
+    if [[ -n "$SIM_VERSION" ]]; then
+      echo "Build completed on $SIM_NAME iOS $SIM_VERSION ($udid)."
+    elif [[ -n "$SIM_RUNTIME" ]]; then
+      echo "Build completed on $SIM_NAME $SIM_RUNTIME ($udid)."
+    else
+      echo "Build completed on $SIM_NAME ($udid)."
+    fi
     exit 0
   fi
 
@@ -194,7 +193,13 @@ run_on_simulator() {
 
   xcrun simctl install "$udid" "$app_path"
   xcrun simctl launch "$udid" "$bundle_id"
-  echo "Run completed on $SIM_NAME ($udid)."
+  if [[ -n "$SIM_VERSION" ]]; then
+    echo "Run completed on $SIM_NAME iOS $SIM_VERSION ($udid)."
+  elif [[ -n "$SIM_RUNTIME" ]]; then
+    echo "Run completed on $SIM_NAME $SIM_RUNTIME ($udid)."
+  else
+    echo "Run completed on $SIM_NAME ($udid)."
+  fi
 }
 
 run_on_real_device() {

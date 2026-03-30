@@ -35,6 +35,7 @@ The `xcdev` CLI offers the following commands for managing devices and building/
 You can assign a specific device name or pattern to your default `sim` and `real` profiles. This is useful for quickly targeting a preferred device.
 
 - `xcdev set sim "iPhone Air"`: Sets the default simulator profile target to a simulator named "iPhone Air".
+- `xcdev set sim --version 18.2 "iPhone Air"`: Sets the default simulator target and preferred iOS runtime version.
 - `xcdev set real "Huawei Air"`: Sets the default real device profile target to a connected device matching "Huawei Air".
 
 ### Building the Project
@@ -42,6 +43,7 @@ You can assign a specific device name or pattern to your default `sim` and `real
 Builds the project for the specified profile without installing or running it.
 
 - `xcdev build sim`: Compiles the project targeting the default simulator.
+- `xcdev build --version 18.2 sim`: Compiles the project targeting the default simulator on a matching iOS runtime version.
 - `xcdev build real`: Compiles the project targeting the default connected real device.
 
 ### Running the Project
@@ -49,6 +51,7 @@ Builds the project for the specified profile without installing or running it.
 Builds (if necessary), installs, and launches the app on the target device.
 
 - `xcdev run sim`: Runs your application on the default simulator. By default, it boots the simulator and opens `Simulator.app` for the selected device.
+- `xcdev run --version 18.2 sim`: Runs your application on the default simulator whose runtime contains `18.2`.
 - `xcdev run real`: Runs your application on the default real device.
 
 Use `xcdev run --no-open-simulator sim` if you want to keep the simulator app hidden while still running on the booted device.
@@ -78,8 +81,10 @@ Common optional keys:
 
 - `IOS_CONFIGURATION`
 - `IOS_BUNDLE_ID`
+- `IOS_SIM_VERSION`
 - `IOS_PROFILE_<NAME>_MODE`
 - `IOS_PROFILE_<NAME>_TARGET`
+- `IOS_PROFILE_<NAME>_VERSION`
 - `IOS_OPEN_SIMULATOR` (`YES` by default; set to `NO` to avoid opening `Simulator.app` during `run`)
 
 Example:
@@ -87,6 +92,7 @@ Example:
 ```bash
 IOS_PROFILE_SIM_MODE="sim"
 IOS_PROFILE_SIM_TARGET="iPhone"
+IOS_PROFILE_SIM_VERSION="18.2"
 
 IOS_PROFILE_REAL_MODE="real"
 IOS_PROFILE_REAL_TARGET=".*"
