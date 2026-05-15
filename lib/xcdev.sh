@@ -24,6 +24,14 @@ if [[ "$ACTION" != "build" && "$ACTION" != "run" ]]; then
   exit 1
 fi
 
+if ! xcodebuild -version &>/dev/null; then
+  echo "Error: xcode-select is pointing to Command Line Tools, not Xcode."
+  echo ""
+  echo "Run the following command to fix:"
+  echo "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+  exit 1
+fi
+
 find_default_project() {
   find "$ROOT_DIR" -maxdepth 1 -name "*.xcodeproj" -print | sort | head -n 1
 }
