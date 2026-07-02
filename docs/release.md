@@ -24,7 +24,7 @@ Optional flags:
 
 ```bash
 bash ./scripts/release.sh patch --otp 123456
-bash ./scripts/release.sh patch --commit-message "feat: improve release flow"
+bash ./scripts/release.sh patch --commit-message "chore: release %s"
 bash ./scripts/release.sh patch --skip-publish
 ```
 
@@ -32,8 +32,8 @@ bash ./scripts/release.sh patch --skip-publish
 
 - run on `main`
 - fetch `origin/main` and stop if local `main` is behind remote
+- require a clean working tree before releasing
 - run `npm run check`
-- auto commit local changes (`git add -A` + `git commit`)
 - run `npm version <bump>`
 - run `npm run publish:dry-run`
 - push `main` and tags to GitHub
@@ -42,6 +42,7 @@ bash ./scripts/release.sh patch --skip-publish
 Notes:
 
 - Package is scoped (`@rabithua/xcdev`), first publish must use `--access public` (already included in script).
+- Commit or stash local changes before running the release script; it no longer auto-stages arbitrary files.
 - Release push now happens before npm publish so the Git tag and `main` stay ahead of the registry instead of the other way around.
 - If 2FA is enabled on npm, finish OTP verification during publish.
 

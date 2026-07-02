@@ -377,8 +377,7 @@ function resolveSimulator(target, version) {
   return selected;
 }
 
-function parseRealDevices() {
-  const output = runCapture("xcrun", ["xctrace", "list", "devices"]);
+function parseRealDevicesOutput(output) {
   const rows = [];
   let inOffline = false;
   for (const rawLine of output.split(/\r?\n/)) {
@@ -393,18 +392,89 @@ function parseRealDevices() {
     }
     if (line.startsWith("==")) continue;
     if (inOffline) continue;
-    if (/Simulator|MacBook|My Mac/i.test(line)) continue;
+    if (/Simulator/i.test(line)) continue;
 
     const tokens = [...line.matchAll(/\(([^)]+)\)/g)].map((m) => m[1]);
     const udid = [...tokens].reverse().find((t) => /^[0-9A-Fa-f-]{8,}$/.test(t));
-    if (!udid) continue;
+    const os = tokens.find((t) => t !== udid && /^\d+(?:\.\d+)*$/.test(t.trim())) || "";
+    if (!udid || !os) continue;
 
     const firstParen = line.indexOf("(");
     const name = firstParen > 0 ? line.slice(0, firstParen).trim() : line;
-    const os = tokens.find((t) => t !== udid) || "";
     rows.push({ name, udid, os });
   }
   return rows;
+}
+
+function isDevicectlDeviceAvailable(device) {
+  const connection = device && device.connectionProperties ? device.connectionProperties : {};
+  if (String(connection.tunnelState || "").toLowerCase() === "unavailable") return false;
+
+  const pairingState = String(connection.pairingState || "").toLowerCase();
+  if (pairingState && pairingState !== "paired") return false;
+
+  const capabilities = Array.isArray(device && device.capabilities) ? device.capabilities : [];
+  if (capabilities.length > 0) {
+    const usable = capabilities.some((capability) => {
+      const id = String(capability && capability.featureIdentifier || "");
+      return (
+        id === "com.apple.coredevice.feature.acquireusageassertion" ||
+        id === "com.apple.coredevice.feature.connectdevice"
+      );
+    });
+    if (!usable) return false;
+  }
+
+  return true;
+}
+
+function parseDevicectlDevicesOutput(output) {
+  const raw = String(output || "");
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart < 0) return [];
+
+  let payload;
+  try {
+    payload = JSON.parse(raw.slice(jsonStart));
+  } catch {
+    return [];
+  }
+
+  const devices = payload && payload.result && Array.isArray(payload.result.devices)
+    ? payload.result.devices
+    : [];
+
+  return devices
+    .filter((device) => {
+      const hardware = device && device.hardwareProperties ? device.hardwareProperties : {};
+      return (
+        String(hardware.platform || "").toLowerCase() === "ios" &&
+        String(hardware.reality || "").toLowerCase() === "physical" &&
+        isDevicectlDeviceAvailable(device)
+      );
+    })
+    .map((device) => {
+      const hardware = device.hardwareProperties || {};
+      const properties = device.deviceProperties || {};
+      return {
+        name: String(properties.name || "").trim(),
+        os: String(properties.osVersionNumber || "").trim(),
+        udid: String(hardware.udid || device.identifier || "").trim()
+      };
+    })
+    .filter((row) => row.name && row.udid);
+}
+
+function parseRealDevices() {
+  try {
+    const rows = parseDevicectlDevicesOutput(
+      runCapture("xcrun", ["devicectl", "list", "devices", "--json-output", "-"])
+    );
+    if (rows.length > 0) return rows;
+  } catch {
+    // Fall back to xctrace for older Xcode toolchains.
+  }
+  return parseRealDevicesOutput(runCapture("xcrun", ["xctrace", "list", "devices"]));
 }
 
 function printTable(columns, rows) {
@@ -688,12 +758,15 @@ module.exports = {
   hasConfiguredProfile,
   listDevices,
   listProfiles,
+  isDevicectlDeviceAvailable,
   normalizeProfileKey,
   normalizeVersion,
   parseBuildRunArgs,
   parseBuildRunOptions,
+  parseDevicectlDevicesOutput,
   parseEnvFile,
   parseSetOptions,
+  parseRealDevicesOutput,
   parseSimulators,
   parseSimulatorsJsonOutput,
   parseSimulatorsTextOutput,

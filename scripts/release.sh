@@ -12,7 +12,7 @@ Usage:
 Examples:
   scripts/release.sh patch
   scripts/release.sh minor --otp 123456
-  scripts/release.sh patch --commit-message "feat: update device config handling"
+  scripts/release.sh patch --commit-message "chore: release %s"
   scripts/release.sh patch --skip-publish
 EOF
 }
@@ -31,7 +31,7 @@ BUMP="$1"
 shift
 
 OTP="${NPM_OTP:-}"
-COMMIT_MESSAGE="${RELEASE_COMMIT_MESSAGE:-chore: prepare release}"
+COMMIT_MESSAGE="${RELEASE_COMMIT_MESSAGE:-chore: release %s}"
 SKIP_PUBLISH="0"
 
 while [[ $# -gt 0 ]]; do
@@ -100,6 +100,16 @@ ensure_remote_in_sync() {
   fi
 }
 
+ensure_clean_worktree() {
+  local status
+  status="$(git status --porcelain)"
+  if [[ -n "$status" ]]; then
+    echo "Working tree has uncommitted changes. Commit or stash them before releasing."
+    printf '%s\n' "$status"
+    exit 1
+  fi
+}
+
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$CURRENT_BRANCH" != "main" ]]; then
   echo "Current branch is '$CURRENT_BRANCH'. Release must run on 'main'."
@@ -107,21 +117,17 @@ if [[ "$CURRENT_BRANCH" != "main" ]]; then
 fi
 
 ensure_remote_in_sync
+ensure_clean_worktree
 
 echo "==> npm run check"
 npm run check
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "==> git add -A"
-  git add -A
-  echo "==> git commit -m \"$COMMIT_MESSAGE\""
-  git commit -m "$COMMIT_MESSAGE"
-fi
+ensure_clean_worktree
 
 ensure_remote_in_sync
 
-echo "==> npm version $BUMP"
-npm version "$BUMP"
+echo "==> npm version $BUMP --message \"$COMMIT_MESSAGE\""
+npm version "$BUMP" --message "$COMMIT_MESSAGE"
 
 NEW_VERSION="$(node -p "require('./package.json').version")"
 echo "New version: $NEW_VERSION"

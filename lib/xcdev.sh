@@ -211,6 +211,54 @@ run_on_simulator() {
 }
 
 run_on_real_device() {
+  xcodebuild_destinations_output() {
+    xcodebuild \
+      "${container_args[@]}" \
+      -scheme "$SCHEME" \
+      -configuration "$CONFIGURATION" \
+      "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
+      -showdestinations 2>/dev/null || true
+  }
+
+  find_xcodebuild_ios_destination_udid() {
+    local destinations_output
+    destinations_output="$(xcodebuild_destinations_output)"
+    printf '%s\n' "$destinations_output" |
+      awk -v pattern="$DEVICE_NAME_PATTERN" '
+        /^[[:space:]]*Available destinations/ { in_available = 1; next }
+        /^[[:space:]]*Ineligible destinations/ { in_available = 0; next }
+        in_available && /platform:iOS,/ &&
+          $0 !~ /platform:iOS Simulator/ &&
+          $0 !~ /dvtdevice-/ &&
+          $0 !~ /error:/ &&
+          $0 ~ pattern {
+          if (match($0, /id:[^,}]+/)) {
+            print substr($0, RSTART + 3, RLENGTH - 3)
+            exit
+          }
+        }
+      '
+  }
+
+  find_first_xcodebuild_ios_destination_udid() {
+    local destinations_output
+    destinations_output="$(xcodebuild_destinations_output)"
+    printf '%s\n' "$destinations_output" |
+      awk '
+        /^[[:space:]]*Available destinations/ { in_available = 1; next }
+        /^[[:space:]]*Ineligible destinations/ { in_available = 0; next }
+        in_available && /platform:iOS,/ &&
+          $0 !~ /platform:iOS Simulator/ &&
+          $0 !~ /dvtdevice-/ &&
+          $0 !~ /error:/ {
+          if (match($0, /id:[^,}]+/)) {
+            print substr($0, RSTART + 3, RLENGTH - 3)
+            exit
+          }
+        }
+      '
+  }
+
   xctrace_devices_output() {
     xcrun xctrace list devices
   }
@@ -224,14 +272,21 @@ run_on_real_device() {
         $0 == "== Devices Offline ==" { in_offline = 1; next }
         $0 == "== Simulators ==" { exit }
         in_offline { next }
-        $0 ~ /MacBook/ || $0 ~ /Simulator/ { next }
+        $0 ~ /Simulator/ { next }
         $0 ~ pattern {
+          udid = ""
+          os = ""
           line = $0
-          while (match(line, /\(([A-Fa-f0-9-]{8,})\)/)) {
-            udid = substr(line, RSTART + 1, RLENGTH - 2)
+          while (match(line, /\([^)]+\)/)) {
+            token = substr(line, RSTART + 1, RLENGTH - 2)
+            if (token ~ /^[A-Fa-f0-9-]{8,}$/) {
+              udid = token
+            } else if (token ~ /^[0-9]+(\.[0-9]+)*$/) {
+              os = token
+            }
             line = substr(line, RSTART + RLENGTH)
           }
-          if (udid != "") {
+          if (udid != "" && os != "") {
             print udid
             exit
           }
@@ -248,14 +303,21 @@ run_on_real_device() {
         $0 == "== Devices Offline ==" { in_offline = 1; next }
         $0 == "== Simulators ==" { exit }
         in_offline { next }
-        $0 ~ /MacBook/ || $0 ~ /Simulator/ { next }
+        $0 ~ /Simulator/ { next }
         {
+          udid = ""
+          os = ""
           line = $0
-          while (match(line, /\(([A-Fa-f0-9-]{8,})\)/)) {
-            udid = substr(line, RSTART + 1, RLENGTH - 2)
+          while (match(line, /\([^)]+\)/)) {
+            token = substr(line, RSTART + 1, RLENGTH - 2)
+            if (token ~ /^[A-Fa-f0-9-]{8,}$/) {
+              udid = token
+            } else if (token ~ /^[0-9]+(\.[0-9]+)*$/) {
+              os = token
+            }
             line = substr(line, RSTART + RLENGTH)
           }
-          if (udid != "") {
+          if (udid != "" && os != "") {
             print udid
             exit
           }
@@ -264,10 +326,16 @@ run_on_real_device() {
   }
 
   local udid app_path bundle_id
-  udid="$(find_connected_device_udid)"
+  udid="$(find_xcodebuild_ios_destination_udid)"
+  if [[ -z "${udid:-}" ]]; then
+    udid="$(find_connected_device_udid)"
+  fi
   if [[ -z "${udid:-}" ]]; then
     local fallback_udid
-    fallback_udid="$(find_first_connected_device_udid)"
+    fallback_udid="$(find_first_xcodebuild_ios_destination_udid)"
+    if [[ -z "${fallback_udid:-}" ]]; then
+      fallback_udid="$(find_first_connected_device_udid)"
+    fi
     if [[ -z "${fallback_udid:-}" ]]; then
       echo "No connected real device found."
       exit 1

@@ -114,3 +114,97 @@ test("selectSimulator picks latest matching runtime when version is omitted", ()
 
   assert.equal(selected && selected.udid, "B");
 });
+
+test("parseRealDevicesOutput ignores local Macs without dropping device names containing Mac", () => {
+  const rows = xcdev.parseRealDevicesOutput(`
+== Devices ==
+于长野的Mac mini (8823ED09-9438-5967-A5BE-B22CD463AB55)
+Mac's iPhone (18.7.8) (00008101-000A3D9934D0001E)
+Huawei Air (26.5) (00008150-00163CCE3E40401C)
+== Simulators ==
+iPhone 17 (26.5) (351603C8-F89F-45C9-859E-BBC492949E4C)
+`);
+
+  assert.deepEqual(rows, [
+    {
+      name: "Mac's iPhone",
+      os: "18.7.8",
+      udid: "00008101-000A3D9934D0001E"
+    },
+    {
+      name: "Huawei Air",
+      os: "26.5",
+      udid: "00008150-00163CCE3E40401C"
+    }
+  ]);
+});
+
+test("parseDevicectlDevicesOutput extracts physical iOS hardware udids", () => {
+  const rows = xcdev.parseDevicectlDevicesOutput(`
+Name             Hostname                          Identifier                             State
+--------------   -------------------------------   ------------------------------------   ------------------
+Huawei Air       Huawei-Air.coredevice.local       8FFD5C16-07F3-5E73-818A-9016F7CB0661   available (paired)
+{
+  "result": {
+    "devices": [
+      {
+        "identifier": "8FFD5C16-07F3-5E73-818A-9016F7CB0661",
+        "deviceProperties": {
+          "name": "Huawei Air",
+          "osVersionNumber": "27.0"
+        },
+        "connectionProperties": {
+          "pairingState": "paired",
+          "tunnelState": "disconnected"
+        },
+        "capabilities": [
+          {
+            "featureIdentifier": "com.apple.coredevice.feature.connectdevice"
+          }
+        ],
+        "hardwareProperties": {
+          "platform": "iOS",
+          "reality": "physical",
+          "udid": "00008150-00163CCE3E40401C"
+        }
+      },
+      {
+        "identifier": "38DDC880-CE28-56ED-B2A0-97B1040998B3",
+        "deviceProperties": {
+          "name": "卧室",
+          "osVersionNumber": "26.5"
+        },
+        "hardwareProperties": {
+          "platform": "audioOS",
+          "reality": "physical"
+        }
+      },
+      {
+        "identifier": "41BA1C4F-8888-4444-AAAA-111122223333",
+        "deviceProperties": {
+          "name": "Unavailable iPhone",
+          "osVersionNumber": "18.7.8"
+        },
+        "connectionProperties": {
+          "pairingState": "paired",
+          "tunnelState": "unavailable"
+        },
+        "hardwareProperties": {
+          "platform": "iOS",
+          "reality": "physical",
+          "udid": "00008101-000A3D9934D0001E"
+        }
+      }
+    ]
+  }
+}
+`);
+
+  assert.deepEqual(rows, [
+    {
+      name: "Huawei Air",
+      os: "27.0",
+      udid: "00008150-00163CCE3E40401C"
+    }
+  ]);
+});
