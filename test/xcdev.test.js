@@ -3,8 +3,67 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const xcdev = require("../bin/xcdev.js");
+
+function createFakeXcodeEnvironment() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xcdev-xcode-test-"));
+  const binDir = path.join(dir, "bin");
+  const projectDir = path.join(dir, "Fixture.xcodeproj");
+  const logPath = path.join(dir, "xcodebuild.log");
+
+  fs.mkdirSync(binDir);
+  fs.mkdirSync(projectDir);
+  fs.writeFileSync(
+    path.join(binDir, "xcodebuild"),
+    `#!/bin/sh
+if [ "$1" = "-version" ]; then
+  echo "Xcode 99.0"
+  exit 0
+fi
+case " $* " in
+  *" -list "*)
+    printf 'Information about project "Fixture":\\n    Schemes:\\n        Fixture\\n'
+    exit 0
+    ;;
+esac
+printf '%s\\n' "$@" >> "$XCODEBUILD_LOG"
+`,
+    { mode: 0o755 }
+  );
+  fs.writeFileSync(path.join(binDir, "xcrun"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  return { dir, binDir, logPath };
+}
+
+function runShellBuild(cleanBuild) {
+  const fixture = createFakeXcodeEnvironment();
+  const env = {
+    ...process.env,
+    PATH: `${fixture.binDir}:${process.env.PATH}`,
+    IOS_WORKDIR: fixture.dir,
+    IOS_SIM_UDID: "SIMULATOR-UDID",
+    XCODEBUILD_LOG: fixture.logPath
+  };
+
+  if (cleanBuild !== undefined) {
+    env.IOS_CLEAN_BUILD = cleanBuild;
+  } else {
+    delete env.IOS_CLEAN_BUILD;
+  }
+
+  const result = spawnSync("/bin/bash", [path.join(__dirname, "../lib/xcdev.sh"), "sim", "build"], {
+    env,
+    encoding: "utf8"
+  });
+  const args = fs.existsSync(fixture.logPath)
+    ? fs.readFileSync(fixture.logPath, "utf8").trim().split("\n")
+    : [];
+
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  return { result, args };
+}
 
 test("parseBuildRunOptions reads simulator version flags", () => {
   assert.deepEqual(
@@ -24,6 +83,21 @@ test("parseBuildRunOptions reads simulator version flags", () => {
       simVersion: "18.3"
     }
   );
+});
+
+test("shell builds are clean by default and can opt into incremental builds", () => {
+  const defaultBuild = runShellBuild(undefined);
+  assert.equal(defaultBuild.result.status, 0, defaultBuild.result.stderr);
+  assert.deepEqual(defaultBuild.args.slice(-2), ["clean", "build"]);
+
+  const incrementalBuild = runShellBuild("NO");
+  assert.equal(incrementalBuild.result.status, 0, incrementalBuild.result.stderr);
+  assert.deepEqual(incrementalBuild.args.slice(-1), ["build"]);
+  assert.equal(incrementalBuild.args.includes("clean"), false);
+
+  const invalidBuild = runShellBuild("sometimes");
+  assert.equal(invalidBuild.result.status, 1);
+  assert.match(invalidBuild.result.stdout, /Invalid IOS_CLEAN_BUILD value/);
 });
 
 test("resolveProfile falls back to simulator defaults and version", () => {

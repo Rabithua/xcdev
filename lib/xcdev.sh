@@ -100,6 +100,7 @@ SIM_RESOLVED_NAME="${IOS_SIM_RESOLVED_NAME:-}"
 SIM_RUNTIME="${IOS_SIM_RUNTIME:-}"
 DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
 OPEN_SIMULATOR="${IOS_OPEN_SIMULATOR:-YES}"
+CLEAN_BUILD="${IOS_CLEAN_BUILD:-YES}"
 
 if [[ -n "$TARGET_VALUE" ]]; then
   if [[ "$MODE" == "sim" ]]; then
@@ -116,6 +117,32 @@ fi
 TARGET_BUILD_DIR=""
 WRAPPER_NAME=""
 PRODUCT_BUNDLE_IDENTIFIER=""
+
+run_xcodebuild() {
+  local destination="$1"
+  local build_actions=(build)
+
+  case "$CLEAN_BUILD" in
+    YES|yes|TRUE|true|1)
+      build_actions=(clean build)
+      echo "Performing a clean build to avoid installing stale output."
+      ;;
+    NO|no|FALSE|false|0)
+      ;;
+    *)
+      echo "Invalid IOS_CLEAN_BUILD value: $CLEAN_BUILD (expected YES or NO)."
+      exit 1
+      ;;
+  esac
+
+  xcodebuild \
+    "${container_args[@]}" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -destination "$destination" \
+    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
+    "${build_actions[@]}"
+}
 
 resolve_build_output() {
   local destination="$1"
@@ -161,13 +188,7 @@ run_on_simulator() {
     open_simulator_app "$udid"
   fi
 
-  xcodebuild \
-    "${container_args[@]}" \
-    -scheme "$SCHEME" \
-    -configuration "$CONFIGURATION" \
-    -destination "id=$udid" \
-    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
-    build
+  run_xcodebuild "id=$udid"
 
   if [[ "$ACTION" == "build" ]]; then
     if [[ -n "$SIM_VERSION" ]]; then
@@ -344,13 +365,7 @@ run_on_real_device() {
     udid="$fallback_udid"
   fi
 
-  xcodebuild \
-    "${container_args[@]}" \
-    -scheme "$SCHEME" \
-    -configuration "$CONFIGURATION" \
-    -destination "id=$udid" \
-    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
-    build
+  run_xcodebuild "id=$udid"
 
   if [[ "$ACTION" == "build" ]]; then
     echo "Build completed on real device ($udid)."

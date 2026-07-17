@@ -40,7 +40,7 @@ You can assign a specific device name or pattern to your default `sim` and `real
 
 ### Building the Project
 
-Builds the project for the specified profile without installing or running it.
+Builds the project for the specified profile without installing or running it. Builds are clean by default so the output cannot reuse stale compiled artifacts.
 
 - `xcdev build sim`: Compiles the project targeting the default simulator.
 - `xcdev build --version 18.2 sim`: Compiles the project targeting the default simulator on a matching iOS runtime version.
@@ -48,7 +48,7 @@ Builds the project for the specified profile without installing or running it.
 
 ### Running the Project
 
-Builds (if necessary), installs, and launches the app on the target device.
+Performs a clean build, installs the newly built app, and launches it on the target device.
 
 - `xcdev run sim`: Runs your application on the default simulator. By default, it boots the simulator and opens `Simulator.app` for the selected device.
 - `xcdev run --version 18.2 sim`: Runs your application on the default simulator whose runtime contains `18.2`.
@@ -86,6 +86,7 @@ Common optional keys:
 - `IOS_PROFILE_<NAME>_TARGET`
 - `IOS_PROFILE_<NAME>_VERSION`
 - `IOS_OPEN_SIMULATOR` (`YES` by default; set to `NO` to avoid opening `Simulator.app` during `run`)
+- `IOS_CLEAN_BUILD` (`YES` by default; set to `NO` to allow incremental Xcode builds)
 
 Example:
 
