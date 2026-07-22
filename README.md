@@ -37,6 +37,7 @@ You can assign a specific device name or pattern to your default `sim` and `real
 - `xcdev set sim "iPhone Air"`: Sets the default simulator profile target to a simulator named "iPhone Air".
 - `xcdev set sim --version 18.2 "iPhone Air"`: Sets the default simulator target and preferred iOS runtime version.
 - `xcdev set real "Huawei Air"`: Sets the default real device profile target to a connected device matching "Huawei Air".
+- `xcdev set scheme Rote`: Saves an explicit Xcode scheme in `.xcdev.env`.
 
 ### Building the Project
 
@@ -45,6 +46,7 @@ Builds the project for the specified profile without installing or running it. B
 - `xcdev build sim`: Compiles the project targeting the default simulator.
 - `xcdev build --version 18.2 sim`: Compiles the project targeting the default simulator on a matching iOS runtime version.
 - `xcdev build real`: Compiles the project targeting the default connected real device.
+- `xcdev build --scheme Rote sim`: Uses `Rote` for this build without changing `.xcdev.env`.
 
 ### Running the Project
 
@@ -66,6 +68,11 @@ If `real` target is not set, xcdev uses the first connected real device.
 
 The CLI auto-discovers `.xcdev.env` by searching upward from current directory.
 If no config is found, it still works with auto-detected project/scheme and default profiles.
+Scheme discovery first looks for a scheme whose name matches the selected project or workspace.
+It uses local `.xcscheme` metadata and resolved package identities to exclude package-only schemes;
+schemes whose ownership cannot be determined remain candidates rather than being silently discarded.
+If more than one plausible scheme remains, xcdev stops and asks you to set `IOS_SCHEME`,
+run `xcdev set scheme <name>`, or pass `--scheme <name>`.
 
 Create `.xcdev.env` in the project root if you want stable project-specific settings.
 You can start from:

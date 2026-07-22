@@ -7,14 +7,28 @@ const { spawnSync } = require("node:child_process");
 
 const xcdev = require("../bin/xcdev.js");
 
-function createFakeXcodeEnvironment() {
+function createFakeXcodeEnvironment(options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xcdev-xcode-test-"));
   const binDir = path.join(dir, "bin");
-  const projectDir = path.join(dir, "Fixture.xcodeproj");
+  const projectName = options.projectName || "Fixture";
+  const containerExtension = options.containerKind === "workspace" ? "xcworkspace" : "xcodeproj";
+  const projectDir = path.join(dir, `${projectName}.${containerExtension}`);
   const logPath = path.join(dir, "xcodebuild.log");
+  const listPath = path.join(dir, "xcodebuild-list.txt");
 
   fs.mkdirSync(binDir);
   fs.mkdirSync(projectDir);
+  if (options.localSchemes) {
+    const schemesDir = path.join(projectDir, "xcshareddata", "xcschemes");
+    fs.mkdirSync(schemesDir, { recursive: true });
+    for (const scheme of options.localSchemes) {
+      fs.writeFileSync(path.join(schemesDir, `${scheme}.xcscheme`), "");
+    }
+  }
+  fs.writeFileSync(
+    listPath,
+    options.listOutput || `Information about project "${projectName}":\n    Schemes:\n        ${projectName}\n`
+  );
   fs.writeFileSync(
     path.join(binDir, "xcodebuild"),
     `#!/bin/sh
@@ -24,7 +38,7 @@ if [ "$1" = "-version" ]; then
 fi
 case " $* " in
   *" -list "*)
-    printf 'Information about project "Fixture":\\n    Schemes:\\n        Fixture\\n'
+    /bin/cat "$XCODEBUILD_LIST"
     exit 0
     ;;
 esac
@@ -34,17 +48,19 @@ printf '%s\\n' "$@" >> "$XCODEBUILD_LOG"
   );
   fs.writeFileSync(path.join(binDir, "xcrun"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
-  return { dir, binDir, logPath };
+  return { dir, binDir, logPath, listPath };
 }
 
-function runShellBuild(cleanBuild) {
-  const fixture = createFakeXcodeEnvironment();
+function runShellBuild(cleanBuild, options = {}) {
+  const fixture = createFakeXcodeEnvironment(options);
   const env = {
     ...process.env,
     PATH: `${fixture.binDir}:${process.env.PATH}`,
     IOS_WORKDIR: fixture.dir,
     IOS_SIM_UDID: "SIMULATOR-UDID",
-    XCODEBUILD_LOG: fixture.logPath
+    XCODEBUILD_LOG: fixture.logPath,
+    XCODEBUILD_LIST: fixture.listPath,
+    ...(options.env || {})
   };
 
   if (cleanBuild !== undefined) {
@@ -71,7 +87,8 @@ test("parseBuildRunOptions reads simulator version flags", () => {
     {
       positional: ["sim"],
       openSimulator: false,
-      simVersion: "18.2"
+      simVersion: "18.2",
+      scheme: ""
     }
   );
 
@@ -80,9 +97,26 @@ test("parseBuildRunOptions reads simulator version flags", () => {
     {
       positional: ["qa"],
       openSimulator: true,
-      simVersion: "18.3"
+      simVersion: "18.3",
+      scheme: ""
     }
   );
+});
+
+test("parseBuildRunOptions reads explicit scheme flags", () => {
+  assert.deepEqual(xcdev.parseBuildRunOptions(["--scheme", "Rote", "sim"]), {
+    positional: ["sim"],
+    openSimulator: true,
+    simVersion: "",
+    scheme: "Rote"
+  });
+
+  assert.deepEqual(xcdev.parseBuildRunOptions(["real", "--scheme=Rote Beta"]), {
+    positional: ["real"],
+    openSimulator: true,
+    simVersion: "",
+    scheme: "Rote Beta"
+  });
 });
 
 test("shell builds are clean by default and can opt into incremental builds", () => {
@@ -98,6 +132,168 @@ test("shell builds are clean by default and can opt into incremental builds", ()
   const invalidBuild = runShellBuild("sometimes");
   assert.equal(invalidBuild.result.status, 1);
   assert.match(invalidBuild.result.stdout, /Invalid IOS_CLEAN_BUILD value/);
+});
+
+test("scheme discovery prefers the scheme matching the project name", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Rote",
+    listOutput: `Information about project "Rote":
+    Targets:
+        Rote
+        RoteSyncTests
+    Build Configurations:
+        Debug
+    Schemes:
+        HighlightSwift
+        Rote
+        RoteSyncTests
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "Rote");
+});
+
+test("scheme discovery excludes schemes matching resolved package identities", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    localSchemes: ["MainApp"],
+    listOutput: `Resolved source packages:
+        HighlightSwift: https://example.com/highlightswift @ 1.0.0
+
+Information about project "Container":
+    Schemes:
+        HighlightSwift
+        MainApp
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "MainApp");
+});
+
+test("scheme discovery fails when multiple project schemes remain", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    localSchemes: ["MainApp", "MainAppTests"],
+    listOutput: `Resolved source packages:
+        HighlightSwift: https://example.com/highlightswift @ 1.0.0
+
+Information about project "Container":
+    Schemes:
+        HighlightSwift
+        MainApp
+        MainAppTests
+`
+  });
+
+  assert.equal(build.result.status, 1);
+  assert.match(build.result.stderr, /Unable to choose a scheme automatically/);
+  assert.match(build.result.stderr, /MainApp/);
+  assert.doesNotMatch(build.result.stderr, /HighlightSwift/);
+});
+
+test("scheme discovery preserves custom local schemes as ambiguous candidates", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    localSchemes: ["MainApp", "Staging"],
+    listOutput: `Resolved source packages:
+        HighlightSwift: https://example.com/highlightswift @ 1.0.0
+
+Information about project "Container":
+    Targets:
+        MainApp
+    Schemes:
+        HighlightSwift
+        MainApp
+        Staging
+`
+  });
+
+  assert.equal(build.result.status, 1);
+  assert.match(build.result.stderr, /MainApp/);
+  assert.match(build.result.stderr, /Staging/);
+  assert.doesNotMatch(build.result.stderr, /HighlightSwift/);
+});
+
+test("scheme discovery selects a custom local scheme when packages are the only alternatives", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    localSchemes: ["Staging"],
+    listOutput: `Resolved source packages:
+        HighlightSwift: https://example.com/highlightswift @ 1.0.0
+
+Information about project "Container":
+    Targets:
+        MainApp
+    Schemes:
+        HighlightSwift
+        Staging
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "Staging");
+});
+
+test("local scheme metadata wins over a same-named package identity", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    localSchemes: ["Textual"],
+    listOutput: `Resolved source packages:
+        textual: https://example.com/textual @ 1.0.0
+
+Information about project "Container":
+    Schemes:
+        Textual
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "Textual");
+});
+
+test("scheme discovery reads workspace-local scheme metadata", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    containerKind: "workspace",
+    localSchemes: ["Staging"],
+    listOutput: `Resolved source packages:
+        HighlightSwift: https://example.com/highlightswift @ 1.0.0
+
+Information about workspace "Container":
+    Schemes:
+        HighlightSwift
+        Staging
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "Staging");
+});
+
+test("explicit scheme override bypasses ambiguous discovery", () => {
+  const build = runShellBuild(undefined, {
+    projectName: "Container",
+    env: { XCDEV_SCHEME_OVERRIDE: "MainApp" },
+    listOutput: `Information about project "Container":
+    Targets:
+        MainApp
+        MainAppTests
+    Schemes:
+        MainApp
+        MainAppTests
+`
+  });
+
+  assert.equal(build.result.status, 0, build.result.stderr);
+  const schemeIndex = build.args.indexOf("-scheme");
+  assert.equal(build.args[schemeIndex + 1], "MainApp");
 });
 
 test("resolveProfile falls back to simulator defaults and version", () => {
@@ -127,6 +323,23 @@ test("setTarget writes simulator target and version into config", () => {
     assert.match(config, /IOS_SIM_VERSION="18\.2"/);
     assert.match(config, /IOS_PROFILE_SIM_TARGET="iPhone Air"/);
     assert.match(config, /IOS_PROFILE_SIM_VERSION="18\.2"/);
+  } finally {
+    console.log = originalLog;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setTarget writes an explicit scheme into config", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xcdev-test-"));
+  const configPath = path.join(dir, ".xcdev.env");
+  const originalLog = console.log;
+  console.log = () => {};
+
+  try {
+    xcdev.setTarget("scheme", "Rote", configPath, configPath);
+    const config = fs.readFileSync(configPath, "utf8");
+
+    assert.match(config, /IOS_SCHEME="Rote"/);
   } finally {
     console.log = originalLog;
     fs.rmSync(dir, { recursive: true, force: true });

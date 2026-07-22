@@ -15,15 +15,18 @@ Usage:
   xcdev list profiles
   xcdev set sim [--version <ios-version>] <simulator-name>
   xcdev set real <device-name-pattern>
-  xcdev build [--version <ios-version>] [profile] [target]
-  xcdev run [--no-open-simulator] [--version <ios-version>] [profile] [target]
+  xcdev set scheme <scheme-name>
+  xcdev build [--scheme <scheme-name>] [--version <ios-version>] [profile] [target]
+  xcdev run [--scheme <scheme-name>] [--no-open-simulator] [--version <ios-version>] [profile] [target]
 
 Examples:
   xcdev list devices
   xcdev list devices sim
   xcdev set sim --version 18.2 "iPhone Air"
   xcdev set real "Huawei Air"
+  xcdev set scheme Rote
   xcdev build --version 18.2 sim
+  xcdev build --scheme Rote sim
   xcdev run --version 18.2 sim
   xcdev run --no-open-simulator sim
   xcdev run real
@@ -70,7 +73,7 @@ function ensureConfigHeader(lines) {
   if (lines.some((line) => line.trim() === marker)) return lines;
   const header = [
     marker,
-    "# Purpose: local project defaults for xcdev device/profile selection.",
+    "# Purpose: local project defaults for xcdev project, scheme, and device selection.",
     "# Created/updated by `xcdev set`.",
     ""
   ];
@@ -546,7 +549,9 @@ function listProfiles(config) {
 function setTarget(kind, value, configPath, preferredConfigPath, options = {}) {
   const target = (value || "").trim();
   if (!target) {
-    throw new Error(`Usage: xcdev set ${kind}${kind === "sim" ? ' [--version <ios-version>]' : ""} "<name>"`);
+    throw new Error(
+      `Usage: xcdev set ${kind}${kind === "sim" ? " [--version <ios-version>]" : ""} <name>`
+    );
   }
 
   const writePath = process.env.IOS_DEV_CONFIG ? configPath : preferredConfigPath;
@@ -571,12 +576,18 @@ function setTarget(kind, value, configPath, preferredConfigPath, options = {}) {
       IOS_PROFILE_REAL_MODE: "real",
       IOS_PROFILE_REAL_TARGET: target
     });
+  } else if (kind === "scheme") {
+    if (options.simVersion) {
+      throw new Error("--version is only supported with `xcdev set sim`");
+    }
+    upsertEnvEntries(writePath, { IOS_SCHEME: target });
   } else {
     throw new Error(`Invalid set target: ${kind}`);
   }
 
   const suffix = kind === "sim" && options.simVersion ? ` (iOS ${options.simVersion})` : "";
-  console.log(`Saved ${kind} target '${target}'${suffix} to ${writePath}`);
+  const label = kind === "scheme" ? "scheme" : `${kind} target`;
+  console.log(`Saved ${label} '${target}'${suffix} to ${writePath}`);
 }
 
 function hasConfiguredProfile(config, profile) {
@@ -602,6 +613,7 @@ function parseBuildRunOptions(args) {
   const positional = [];
   let openSimulator = true;
   let simVersion = "";
+  let scheme = "";
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -625,10 +637,26 @@ function parseBuildRunOptions(args) {
       }
       continue;
     }
+    if (arg === "--scheme") {
+      const next = args[i + 1];
+      if (!next) {
+        throw new Error("Missing value for --scheme");
+      }
+      scheme = next.trim();
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--scheme=")) {
+      scheme = arg.slice("--scheme=".length).trim();
+      if (!scheme) {
+        throw new Error("Missing value for --scheme");
+      }
+      continue;
+    }
     positional.push(arg);
   }
 
-  return { positional, openSimulator, simVersion };
+  return { positional, openSimulator, simVersion, scheme };
 }
 
 function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config, options = {}) {
@@ -659,6 +687,10 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
         ? "NO"
         : process.env.IOS_OPEN_SIMULATOR || config.IOS_OPEN_SIMULATOR || "YES"
   };
+
+  if (options.scheme) {
+    env.XCDEV_SCHEME_OVERRIDE = options.scheme;
+  }
 
   if (mode === "sim") {
     const selectedSimulator = resolveSimulator(finalTarget, finalVersion);
@@ -731,8 +763,8 @@ function main() {
 
   if (cmd === "set") {
     const kind = (argv[1] || "").toLowerCase();
-    if (kind !== "sim" && kind !== "real") {
-      throw new Error("Usage: xcdev set <sim|real> \"<name>\"");
+    if (kind !== "sim" && kind !== "real" && kind !== "scheme") {
+      throw new Error("Usage: xcdev set <sim|real|scheme> <name>");
     }
     const options = parseSetOptions(argv.slice(2));
     const value = options.positional.join(" ");

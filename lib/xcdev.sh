@@ -73,18 +73,184 @@ else
   exit 1
 fi
 
-find_default_scheme() {
-  xcodebuild -list "${container_args[@]}" | awk '
-    /^[[:space:]]*Schemes:/ { in_schemes = 1; next }
-    in_schemes && NF {
-      gsub(/^[[:space:]]+/, "", $0)
-      print $0
-      exit
+container_display_name() {
+  local container_path
+  if [[ -n "${WORKSPACE:-}" ]]; then
+    container_path="$WORKSPACE"
+  else
+    container_path="$PROJECT"
+  fi
+
+  container_path="$(basename "$container_path")"
+  printf '%s\n' "${container_path%.*}"
+}
+
+list_xcodebuild_section() {
+  local section="$1"
+  awk -v requested_section="$section" '
+    /^[[:space:]]*(Targets|Build Configurations|Schemes):[[:space:]]*$/ {
+      current_section = $0
+      gsub(/^[[:space:]]+|[[:space:]]*:?[[:space:]]*$/, "", current_section)
+      next
+    }
+    current_section == requested_section && NF {
+      value = $0
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      print value
     }
   '
 }
 
-SCHEME="${IOS_SCHEME:-$(find_default_scheme)}"
+list_resolved_package_names() {
+  awk '
+    /^[[:space:]]*Resolved source packages:[[:space:]]*$/ {
+      in_packages = 1
+      next
+    }
+    /^[[:space:]]*Information about (project|workspace)/ {
+      in_packages = 0
+    }
+    in_packages && /^[[:space:]]+[^:]+:/ {
+      value = $0
+      gsub(/^[[:space:]]+/, "", value)
+      sub(/:.*/, "", value)
+      print value
+    }
+  '
+}
+
+find_local_scheme_files() {
+  if [[ -n "${PROJECT:-}" ]]; then
+    find "$PROJECT" -type f -name "*.xcscheme" -path "*/xcschemes/*" -print
+    return
+  fi
+
+  # Workspace schemes can live in the workspace itself or in one of its local
+  # projects. Prune conventional dependency/build directories so package and
+  # generated schemes are not mistaken for project-owned schemes.
+  find "$ROOT_DIR" \
+    \( -type d \( \
+      -name .git -o \
+      -name .build -o \
+      -name build -o \
+      -name DerivedData -o \
+      -name Pods -o \
+      -name Carthage -o \
+      -name SourcePackages \
+    \) -prune \) -o \
+    \( -type f -name "*.xcscheme" -path "*/xcschemes/*" -print \)
+}
+
+list_local_scheme_names() {
+  local scheme_path filename
+  while IFS= read -r scheme_path; do
+    [[ -z "$scheme_path" ]] && continue
+    filename="$(basename "$scheme_path")"
+    printf '%s\n' "${filename%.xcscheme}"
+  done < <(find_local_scheme_files)
+}
+
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+print_ambiguous_schemes() {
+  local container_name="$1"
+  shift
+
+  echo "Unable to choose a scheme automatically for '$container_name'." >&2
+  echo "Candidate schemes:" >&2
+  local scheme
+  for scheme in "$@"; do
+    echo "  $scheme" >&2
+  done
+  echo "Set IOS_SCHEME in .xcdev.env, run 'xcdev set scheme <name>', or pass '--scheme <name>'." >&2
+}
+
+find_default_scheme() {
+  local list_output container_name scheme package_name local_scheme_name
+  local scheme_lower package_lower is_local is_package
+  local -a schemes=()
+  local -a package_names=()
+  local -a local_scheme_names=()
+  local -a candidates=()
+
+  list_output="$(xcodebuild -list "${container_args[@]}")"
+  container_name="$(container_display_name)"
+
+  while IFS= read -r scheme; do
+    [[ -n "$scheme" ]] && schemes+=("$scheme")
+  done < <(printf '%s\n' "$list_output" | list_xcodebuild_section "Schemes")
+
+  if [[ ${#schemes[@]} -eq 0 ]]; then
+    echo "No scheme found for '$container_name'. Set IOS_SCHEME in .xcdev.env." >&2
+    return 1
+  fi
+
+  while IFS= read -r package_name; do
+    [[ -n "$package_name" ]] && package_names+=("$package_name")
+  done < <(printf '%s\n' "$list_output" | list_resolved_package_names)
+
+  while IFS= read -r local_scheme_name; do
+    [[ -n "$local_scheme_name" ]] && local_scheme_names+=("$local_scheme_name")
+  done < <(list_local_scheme_names)
+
+  # Keep all unknown schemes. A scheme is excluded only when its name matches
+  # a resolved Swift Package and no local .xcscheme with that name exists.
+  for scheme in "${schemes[@]}"; do
+    is_local=0
+    for local_scheme_name in "${local_scheme_names[@]-}"; do
+      [[ -z "$local_scheme_name" ]] && continue
+      if [[ "$scheme" == "$local_scheme_name" ]]; then
+        is_local=1
+        break
+      fi
+    done
+
+    is_package=0
+    if [[ "$is_local" -eq 0 ]]; then
+      scheme_lower="$(lowercase "$scheme")"
+      for package_name in "${package_names[@]-}"; do
+        [[ -z "$package_name" ]] && continue
+        package_lower="$(lowercase "$package_name")"
+        if [[ "$scheme_lower" == "$package_lower" ]]; then
+          is_package=1
+          break
+        fi
+      done
+    fi
+
+    if [[ "$is_package" -eq 0 ]]; then
+      candidates+=("$scheme")
+    fi
+  done
+
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    echo "No non-package scheme found for '$container_name'. Set IOS_SCHEME in .xcdev.env." >&2
+    return 1
+  fi
+
+  # The container's own non-package scheme is the strongest automatic signal.
+  for scheme in "${candidates[@]}"; do
+    if [[ "$scheme" == "$container_name" ]]; then
+      printf '%s\n' "$scheme"
+      return 0
+    fi
+  done
+
+  if [[ ${#candidates[@]} -eq 1 ]]; then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+
+  print_ambiguous_schemes "$container_name" "${candidates[@]}"
+  return 1
+}
+
+SCHEME="${XCDEV_SCHEME_OVERRIDE:-${IOS_SCHEME:-}}"
+if [[ -z "${SCHEME:-}" ]]; then
+  SCHEME="$(find_default_scheme)"
+fi
 if [[ -z "${SCHEME:-}" ]]; then
   echo "No scheme found. Set IOS_SCHEME in .xcdev.env."
   exit 1
