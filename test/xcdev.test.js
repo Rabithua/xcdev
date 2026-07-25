@@ -15,9 +15,14 @@ function createFakeXcodeEnvironment(options = {}) {
   const projectDir = path.join(dir, `${projectName}.${containerExtension}`);
   const logPath = path.join(dir, "xcodebuild.log");
   const listPath = path.join(dir, "xcodebuild-list.txt");
+  const targetBuildDir = path.join(dir, "build");
 
   fs.mkdirSync(binDir);
   fs.mkdirSync(projectDir);
+  fs.mkdirSync(path.join(targetBuildDir, `${projectName}.app`), { recursive: true });
+  if (options.configContent) {
+    fs.writeFileSync(path.join(dir, ".xcdev.env"), options.configContent);
+  }
   if (options.localSchemes) {
     const schemesDir = path.join(projectDir, "xcshareddata", "xcschemes");
     fs.mkdirSync(schemesDir, { recursive: true });
@@ -43,12 +48,29 @@ case " $* " in
     ;;
 esac
 printf '%s\\n' "$@" >> "$XCODEBUILD_LOG"
+case " $* " in
+  *" -showBuildSettings "*)
+    echo "    TARGET_BUILD_DIR = $XCODEBUILD_TARGET_BUILD_DIR"
+    echo "    WRAPPER_NAME = ${projectName}.app"
+    echo "    PRODUCT_BUNDLE_IDENTIFIER = com.example.fixture"
+    exit 0
+    ;;
+  *" -showdestinations "*)
+    echo "Available destinations for the \\"${projectName}\\" scheme:"
+    echo "    { platform:iOS, arch:arm64, id:REAL-DEVICE-UDID, name:Fixture iPhone }"
+    exit 0
+    ;;
+esac
+if [ -n "$XCODEBUILD_FAILURE_OUTPUT" ]; then
+  printf '%s\\n' "$XCODEBUILD_FAILURE_OUTPUT" >&2
+  exit "\${XCODEBUILD_FAILURE_STATUS:-65}"
+fi
 `,
     { mode: 0o755 }
   );
   fs.writeFileSync(path.join(binDir, "xcrun"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
-  return { dir, binDir, logPath, listPath };
+  return { dir, binDir, logPath, listPath, targetBuildDir };
 }
 
 function runShellBuild(cleanBuild, options = {}) {
@@ -60,8 +82,12 @@ function runShellBuild(cleanBuild, options = {}) {
     IOS_SIM_UDID: "SIMULATOR-UDID",
     XCODEBUILD_LOG: fixture.logPath,
     XCODEBUILD_LIST: fixture.listPath,
-    ...(options.env || {})
+    XCODEBUILD_TARGET_BUILD_DIR: fixture.targetBuildDir,
+    XCODEBUILD_FAILURE_OUTPUT: ""
   };
+  delete env.IOS_SKIP_MACRO_VALIDATION;
+  delete env.XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE;
+  Object.assign(env, options.env || {});
 
   if (cleanBuild !== undefined) {
     env.IOS_CLEAN_BUILD = cleanBuild;
@@ -69,16 +95,63 @@ function runShellBuild(cleanBuild, options = {}) {
     delete env.IOS_CLEAN_BUILD;
   }
 
-  const result = spawnSync("/bin/bash", [path.join(__dirname, "../lib/xcdev.sh"), "sim", "build"], {
-    env,
-    encoding: "utf8"
-  });
+  const result = spawnSync(
+    "/bin/bash",
+    [
+      path.join(__dirname, "../lib/xcdev.sh"),
+      options.mode || "sim",
+      options.action || "build"
+    ],
+    {
+      env,
+      encoding: "utf8"
+    }
+  );
   const args = fs.existsSync(fixture.logPath)
     ? fs.readFileSync(fixture.logPath, "utf8").trim().split("\n")
     : [];
 
   fs.rmSync(fixture.dir, { recursive: true, force: true });
   return { result, args };
+}
+
+function runCliWithFakeCore(args, configContent = "") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xcdev-cli-test-"));
+  const binDir = path.join(dir, "bin");
+  const envLogPath = path.join(dir, "core-env.log");
+
+  fs.mkdirSync(binDir);
+  fs.mkdirSync(path.join(dir, "Fixture.xcodeproj"));
+  if (configContent) {
+    fs.writeFileSync(path.join(dir, ".xcdev.env"), configContent);
+  }
+  fs.writeFileSync(
+    path.join(binDir, "bash"),
+    `#!/bin/sh
+printf '%s\\n' "$IOS_SKIP_MACRO_VALIDATION" "$XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE" > "$XCDEV_CORE_ENV_LOG"
+`,
+    { mode: 0o755 }
+  );
+
+  const env = {
+    ...process.env,
+    PATH: `${binDir}:${process.env.PATH}`,
+    XCDEV_CORE_ENV_LOG: envLogPath
+  };
+  delete env.IOS_SKIP_MACRO_VALIDATION;
+  delete env.XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE;
+
+  const result = spawnSync(process.execPath, [path.join(__dirname, "../bin/xcdev.js"), ...args], {
+    cwd: dir,
+    env,
+    encoding: "utf8"
+  });
+  const envValues = fs.existsSync(envLogPath)
+    ? fs.readFileSync(envLogPath, "utf8").trim().split("\n")
+    : [];
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { result, envValues };
 }
 
 test("parseBuildRunOptions reads simulator version flags", () => {
@@ -88,7 +161,8 @@ test("parseBuildRunOptions reads simulator version flags", () => {
       positional: ["sim"],
       openSimulator: false,
       simVersion: "18.2",
-      scheme: ""
+      scheme: "",
+      skipMacroValidation: false
     }
   );
 
@@ -98,7 +172,8 @@ test("parseBuildRunOptions reads simulator version flags", () => {
       positional: ["qa"],
       openSimulator: true,
       simVersion: "18.3",
-      scheme: ""
+      scheme: "",
+      skipMacroValidation: false
     }
   );
 });
@@ -108,15 +183,61 @@ test("parseBuildRunOptions reads explicit scheme flags", () => {
     positional: ["sim"],
     openSimulator: true,
     simVersion: "",
-    scheme: "Rote"
+    scheme: "Rote",
+    skipMacroValidation: false
   });
 
   assert.deepEqual(xcdev.parseBuildRunOptions(["real", "--scheme=Rote Beta"]), {
     positional: ["real"],
     openSimulator: true,
     simVersion: "",
-    scheme: "Rote Beta"
+    scheme: "Rote Beta",
+    skipMacroValidation: false
   });
+});
+
+test("parseBuildRunOptions reads the macro validation opt-out flag", () => {
+  assert.deepEqual(
+    xcdev.parseBuildRunOptions(["real", "--skip-macro-validation"]),
+    {
+      positional: ["real"],
+      openSimulator: true,
+      simVersion: "",
+      scheme: "",
+      skipMacroValidation: true
+    }
+  );
+});
+
+test("help documents the macro validation opt-out", () => {
+  const help = spawnSync(process.execPath, [path.join(__dirname, "../bin/xcdev.js"), "--help"], {
+    encoding: "utf8"
+  });
+
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /xcdev build .*--skip-macro-validation/);
+  assert.match(help.stdout, /xcdev run .*--skip-macro-validation/);
+  assert.match(help.stdout, /IOS_SKIP_MACRO_VALIDATION defaults to NO/);
+});
+
+test("CLI passes explicit and configured macro validation settings to the core script", () => {
+  const explicit = runCliWithFakeCore(
+    ["build", "--skip-macro-validation", "real"],
+    'IOS_SKIP_MACRO_VALIDATION="NO"\n'
+  );
+  assert.equal(explicit.result.status, 0, explicit.result.stderr);
+  assert.deepEqual(explicit.envValues, ["YES", "YES"]);
+
+  const configured = runCliWithFakeCore(
+    ["run", "real"],
+    'IOS_SKIP_MACRO_VALIDATION="YES"\n'
+  );
+  assert.equal(configured.result.status, 0, configured.result.stderr);
+  assert.deepEqual(configured.envValues, ["YES", "YES"]);
+
+  const defaultBuild = runCliWithFakeCore(["build", "real"]);
+  assert.equal(defaultBuild.result.status, 0, defaultBuild.result.stderr);
+  assert.deepEqual(defaultBuild.envValues, ["NO", "NO"]);
 });
 
 test("shell builds are clean by default and can opt into incremental builds", () => {
@@ -132,6 +253,62 @@ test("shell builds are clean by default and can opt into incremental builds", ()
   const invalidBuild = runShellBuild("sometimes");
   assert.equal(invalidBuild.result.status, 1);
   assert.match(invalidBuild.result.stdout, /Invalid IOS_CLEAN_BUILD value/);
+});
+
+test("shell adds -skipMacroValidation only when explicitly configured", () => {
+  const defaultBuild = runShellBuild("NO");
+  assert.equal(defaultBuild.result.status, 0, defaultBuild.result.stderr);
+  assert.equal(defaultBuild.args.includes("-skipMacroValidation"), false);
+
+  const configuredBuild = runShellBuild("NO", {
+    configContent: 'IOS_SKIP_MACRO_VALIDATION="YES"\n'
+  });
+  assert.equal(configuredBuild.result.status, 0, configuredBuild.result.stderr);
+  assert.equal(configuredBuild.args.filter((arg) => arg === "-skipMacroValidation").length, 1);
+
+  const explicitRun = runShellBuild("NO", {
+    action: "run",
+    env: {
+      IOS_OPEN_SIMULATOR: "NO",
+      XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE: "YES"
+    }
+  });
+  assert.equal(explicitRun.result.status, 0, explicitRun.result.stderr);
+  assert.equal(explicitRun.args.filter((arg) => arg === "-skipMacroValidation").length, 2);
+  assert.equal(explicitRun.args.filter((arg) => arg === "-showBuildSettings").length, 1);
+
+  const realBuild = runShellBuild("NO", {
+    mode: "real",
+    env: { XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE: "YES" }
+  });
+  assert.equal(realBuild.result.status, 0, realBuild.result.stderr);
+  assert.equal(realBuild.args.filter((arg) => arg === "-skipMacroValidation").length, 1);
+});
+
+test("shell explains how to resolve rejected Swift macros without bypassing validation", () => {
+  const macroError =
+    "error: Macro “FixtureMacros” from package “FixturePackage” must be enabled before it can be used";
+  const rejectedBuild = runShellBuild("NO", {
+    env: { XCODEBUILD_FAILURE_OUTPUT: macroError }
+  });
+
+  assert.equal(rejectedBuild.result.status, 65);
+  assert.doesNotMatch(rejectedBuild.result.stdout, /Macro .*must be enabled before it can be used/);
+  assert.match(rejectedBuild.result.stderr, /Macro .*must be enabled before it can be used/);
+  assert.match(rejectedBuild.result.stderr, /open the project in Xcode and approve it/i);
+  assert.match(rejectedBuild.result.stderr, /--skip-macro-validation/);
+  assert.match(rejectedBuild.result.stderr, /IOS_SKIP_MACRO_VALIDATION=YES/);
+  assert.equal(rejectedBuild.args.includes("-skipMacroValidation"), false);
+
+  const optedOutBuild = runShellBuild("NO", {
+    env: {
+      XCODEBUILD_FAILURE_OUTPUT: macroError,
+      XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE: "YES"
+    }
+  });
+  assert.equal(optedOutBuild.result.status, 65);
+  assert.doesNotMatch(optedOutBuild.result.stderr, /Swift macro validation blocked/);
+  assert.equal(optedOutBuild.args.includes("-skipMacroValidation"), true);
 });
 
 test("scheme discovery prefers the scheme matching the project name", () => {

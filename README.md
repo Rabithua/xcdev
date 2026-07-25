@@ -47,6 +47,7 @@ Builds the project for the specified profile without installing or running it. B
 - `xcdev build --version 18.2 sim`: Compiles the project targeting the default simulator on a matching iOS runtime version.
 - `xcdev build real`: Compiles the project targeting the default connected real device.
 - `xcdev build --scheme Rote sim`: Uses `Rote` for this build without changing `.xcdev.env`.
+- `xcdev build --skip-macro-validation sim`: Bypasses Xcode's Swift macro validation for this build. Use this only after reviewing and trusting the macros involved.
 
 ### Running the Project
 
@@ -55,6 +56,7 @@ Performs a clean build, installs the newly built app, and launches it on the tar
 - `xcdev run sim`: Runs your application on the default simulator. By default, it boots the simulator and opens `Simulator.app` for the selected device.
 - `xcdev run --version 18.2 sim`: Runs your application on the default simulator whose runtime contains `18.2`.
 - `xcdev run real`: Runs your application on the default real device.
+- `xcdev run --skip-macro-validation sim`: Bypasses Xcode's Swift macro validation for this run. Use this only for trusted macros.
 
 Use `xcdev run --no-open-simulator sim` if you want to keep the simulator app hidden while still running on the booted device.
 
@@ -94,6 +96,13 @@ Common optional keys:
 - `IOS_PROFILE_<NAME>_VERSION`
 - `IOS_OPEN_SIMULATOR` (`YES` by default; set to `NO` to avoid opening `Simulator.app` during `run`)
 - `IOS_CLEAN_BUILD` (`YES` by default; set to `NO` to allow incremental Xcode builds)
+- `IOS_SKIP_MACRO_VALIDATION` (`NO` by default; set to `YES` only to bypass validation for Swift macros you trust)
+
+Swift macro validation remains enabled by default. If Xcode reports that a macro must be
+enabled before it can be used, review the macro and approve it by opening the project in
+Xcode and building once. For trusted macros, you can explicitly bypass validation for one
+command with `--skip-macro-validation`, or for the project with
+`IOS_SKIP_MACRO_VALIDATION=YES`.
 
 Example:
 
@@ -104,4 +113,7 @@ IOS_PROFILE_SIM_VERSION="18.2"
 
 IOS_PROFILE_REAL_MODE="real"
 IOS_PROFILE_REAL_TARGET=".*"
+
+# Keep Xcode macro validation enabled unless all macros have been reviewed and trusted.
+IOS_SKIP_MACRO_VALIDATION="NO"
 ```

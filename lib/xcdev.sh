@@ -267,6 +267,20 @@ SIM_RUNTIME="${IOS_SIM_RUNTIME:-}"
 DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
 OPEN_SIMULATOR="${IOS_OPEN_SIMULATOR:-YES}"
 CLEAN_BUILD="${IOS_CLEAN_BUILD:-YES}"
+SKIP_MACRO_VALIDATION="${XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE:-${IOS_SKIP_MACRO_VALIDATION:-NO}}"
+
+MACRO_VALIDATION_ARG=""
+case "$SKIP_MACRO_VALIDATION" in
+  YES|yes|TRUE|true|1)
+    MACRO_VALIDATION_ARG="-skipMacroValidation"
+    ;;
+  NO|no|FALSE|false|0)
+    ;;
+  *)
+    echo "Invalid IOS_SKIP_MACRO_VALIDATION value: $SKIP_MACRO_VALIDATION (expected YES or NO)."
+    exit 1
+    ;;
+esac
 
 if [[ -n "$TARGET_VALUE" ]]; then
   if [[ "$MODE" == "sim" ]]; then
@@ -287,6 +301,14 @@ PRODUCT_BUNDLE_IDENTIFIER=""
 run_xcodebuild() {
   local destination="$1"
   local build_actions=(build)
+  local xcodebuild_args=(
+    "${container_args[@]}"
+    -scheme "$SCHEME"
+    -configuration "$CONFIGURATION"
+    -destination "$destination"
+    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB"
+  )
+  local build_log status
 
   case "$CLEAN_BUILD" in
     YES|yes|TRUE|true|1)
@@ -301,26 +323,53 @@ run_xcodebuild() {
       ;;
   esac
 
-  xcodebuild \
-    "${container_args[@]}" \
-    -scheme "$SCHEME" \
-    -configuration "$CONFIGURATION" \
-    -destination "$destination" \
-    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
-    "${build_actions[@]}"
+  if [[ -n "$MACRO_VALIDATION_ARG" ]]; then
+    xcodebuild_args+=("$MACRO_VALIDATION_ARG")
+  fi
+
+  build_log="$(mktemp "${TMPDIR:-/tmp}/xcdev-xcodebuild.XXXXXX")"
+  if xcodebuild "${xcodebuild_args[@]}" "${build_actions[@]}" \
+      > >(tee -a "$build_log") \
+      2> >(tee -a "$build_log" >&2); then
+    status=0
+  else
+    status=$?
+  fi
+  wait || true
+
+  if [[ "$status" -eq 0 ]]; then
+    rm -f "$build_log"
+    return 0
+  fi
+
+  if [[ -z "$MACRO_VALIDATION_ARG" ]] &&
+    grep -Eiq 'macro .*must be enabled before it can be used' "$build_log"; then
+    echo "" >&2
+    echo "Swift macro validation blocked this build." >&2
+    echo "Review the macro, then open the project in Xcode and approve it if you trust it." >&2
+    echo "Alternatively, rerun with 'xcdev $ACTION --skip-macro-validation ...' or set" >&2
+    echo "IOS_SKIP_MACRO_VALIDATION=YES in .xcdev.env to bypass validation for trusted macros." >&2
+  fi
+
+  rm -f "$build_log"
+  return "$status"
 }
 
 resolve_build_output() {
   local destination="$1"
   local build_settings
+  local xcodebuild_args=(
+    "${container_args[@]}"
+    -scheme "$SCHEME"
+    -configuration "$CONFIGURATION"
+    -destination "$destination"
+    "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB"
+  )
+  if [[ -n "$MACRO_VALIDATION_ARG" ]]; then
+    xcodebuild_args+=("$MACRO_VALIDATION_ARG")
+  fi
   build_settings="$(
-    xcodebuild \
-      "${container_args[@]}" \
-      -scheme "$SCHEME" \
-      -configuration "$CONFIGURATION" \
-      -destination "$destination" \
-      "ENABLE_DEBUG_DYLIB=$ENABLE_DEBUG_DYLIB" \
-      -showBuildSettings
+    xcodebuild "${xcodebuild_args[@]}" -showBuildSettings
   )"
 
   TARGET_BUILD_DIR="$(printf '%s\n' "$build_settings" | sed -n 's/^[[:space:]]*TARGET_BUILD_DIR = //p' | tail -n 1)"

@@ -16,8 +16,8 @@ Usage:
   xcdev set sim [--version <ios-version>] <simulator-name>
   xcdev set real <device-name-pattern>
   xcdev set scheme <scheme-name>
-  xcdev build [--scheme <scheme-name>] [--version <ios-version>] [profile] [target]
-  xcdev run [--scheme <scheme-name>] [--no-open-simulator] [--version <ios-version>] [profile] [target]
+  xcdev build [--scheme <scheme-name>] [--skip-macro-validation] [--version <ios-version>] [profile] [target]
+  xcdev run [--scheme <scheme-name>] [--skip-macro-validation] [--no-open-simulator] [--version <ios-version>] [profile] [target]
 
 Examples:
   xcdev list devices
@@ -27,14 +27,19 @@ Examples:
   xcdev set scheme Rote
   xcdev build --version 18.2 sim
   xcdev build --scheme Rote sim
+  xcdev build --skip-macro-validation sim
   xcdev run --version 18.2 sim
   xcdev run --no-open-simulator sim
   xcdev run real
   xcdev run real "Huawei Air"
   xcdev run "Huawei Air"
 
+Build/run options:
+  --skip-macro-validation  Bypass Xcode validation only for Swift macros you trust.
+
 Config:
   Reads .xcdev.env from current working directory by default.
+  IOS_SKIP_MACRO_VALIDATION defaults to NO.
 `);
 }
 
@@ -614,9 +619,14 @@ function parseBuildRunOptions(args) {
   let openSimulator = true;
   let simVersion = "";
   let scheme = "";
+  let skipMacroValidation = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
+    if (arg === "--skip-macro-validation") {
+      skipMacroValidation = true;
+      continue;
+    }
     if (arg === "--no-open-simulator") {
       openSimulator = false;
       continue;
@@ -656,7 +666,7 @@ function parseBuildRunOptions(args) {
     positional.push(arg);
   }
 
-  return { positional, openSimulator, simVersion, scheme };
+  return { positional, openSimulator, simVersion, scheme, skipMacroValidation };
 }
 
 function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config, options = {}) {
@@ -682,6 +692,11 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
     IOS_WORKDIR: workDir,
     IOS_DEV_CONFIG: configPath,
     IOS_SIM_VERSION: finalVersion,
+    IOS_SKIP_MACRO_VALIDATION: options.skipMacroValidation
+      ? "YES"
+      : process.env.IOS_SKIP_MACRO_VALIDATION ||
+        config.IOS_SKIP_MACRO_VALIDATION ||
+        "NO",
     IOS_OPEN_SIMULATOR:
       options.openSimulator === false
         ? "NO"
@@ -691,6 +706,7 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
   if (options.scheme) {
     env.XCDEV_SCHEME_OVERRIDE = options.scheme;
   }
+  env.XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE = env.IOS_SKIP_MACRO_VALIDATION;
 
   if (mode === "sim") {
     const selectedSimulator = resolveSimulator(finalTarget, finalVersion);
