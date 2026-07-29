@@ -57,8 +57,11 @@ Performs a clean build, installs the newly built app, and launches it on the tar
 - `xcdev run --version 18.2 sim`: Runs your application on the default simulator whose runtime contains `18.2`.
 - `xcdev run real`: Runs your application on the default real device.
 - `xcdev run --skip-macro-validation sim`: Bypasses Xcode's Swift macro validation for this run. Use this only for trusted macros.
+- `xcdev run --logs real`: Runs on the default real device and keeps streaming that app's console logs until the app exits or you press `Ctrl-C`.
 
 Use `xcdev run --no-open-simulator sim` if you want to keep the simulator app hidden while still running on the booted device.
+
+`--logs` is supported for real-device runs. It relaunches any existing instance of the app so `devicectl` can attach its console after installation.
 
 *(Note: `sim` and `real` are recommended default profile names. Any custom profile name, such as `office-phone`, can be used if defined in `.xcdev.env`.)*
 
@@ -97,6 +100,7 @@ Common optional keys:
 - `IOS_OPEN_SIMULATOR` (`YES` by default; set to `NO` to avoid opening `Simulator.app` during `run`)
 - `IOS_CLEAN_BUILD` (`YES` by default; set to `NO` to allow incremental Xcode builds)
 - `IOS_SKIP_MACRO_VALIDATION` (`NO` by default; set to `YES` only to bypass validation for Swift macros you trust)
+- `IOS_MONITOR_LOGS` (`NO` by default; set to `YES` to stream app logs after a real-device install)
 
 Swift macro validation remains enabled by default. If Xcode reports that a macro must be
 enabled before it can be used, review the macro and approve it by opening the project in

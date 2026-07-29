@@ -16,6 +16,7 @@ function createFakeXcodeEnvironment(options = {}) {
   const logPath = path.join(dir, "xcodebuild.log");
   const listPath = path.join(dir, "xcodebuild-list.txt");
   const targetBuildDir = path.join(dir, "build");
+  const xcrunLogPath = path.join(dir, "xcrun.log");
 
   fs.mkdirSync(binDir);
   fs.mkdirSync(projectDir);
@@ -68,9 +69,13 @@ fi
 `,
     { mode: 0o755 }
   );
-  fs.writeFileSync(path.join(binDir, "xcrun"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(binDir, "xcrun"),
+    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$XCRUN_LOG\"\nexit 0\n",
+    { mode: 0o755 }
+  );
 
-  return { dir, binDir, logPath, listPath, targetBuildDir };
+  return { dir, binDir, logPath, listPath, targetBuildDir, xcrunLogPath };
 }
 
 function runShellBuild(cleanBuild, options = {}) {
@@ -83,7 +88,8 @@ function runShellBuild(cleanBuild, options = {}) {
     XCODEBUILD_LOG: fixture.logPath,
     XCODEBUILD_LIST: fixture.listPath,
     XCODEBUILD_TARGET_BUILD_DIR: fixture.targetBuildDir,
-    XCODEBUILD_FAILURE_OUTPUT: ""
+    XCODEBUILD_FAILURE_OUTPUT: "",
+    XCRUN_LOG: fixture.xcrunLogPath
   };
   delete env.IOS_SKIP_MACRO_VALIDATION;
   delete env.XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE;
@@ -154,12 +160,40 @@ printf '%s\\n' "$IOS_SKIP_MACRO_VALIDATION" "$XCDEV_SKIP_MACRO_VALIDATION_OVERRI
   return { result, envValues };
 }
 
+function runShellReal(monitorLogs) {
+  const fixture = createFakeXcodeEnvironment();
+  const env = {
+    ...process.env,
+    PATH: `${fixture.binDir}:${process.env.PATH}`,
+    IOS_WORKDIR: fixture.dir,
+    IOS_CLEAN_BUILD: "NO",
+    IOS_MONITOR_LOGS: monitorLogs ? "YES" : "NO",
+    XCODEBUILD_LOG: fixture.logPath,
+    XCODEBUILD_LIST: fixture.listPath,
+    XCODEBUILD_TARGET_BUILD_DIR: fixture.targetBuildDir,
+    XCODEBUILD_FAILURE_OUTPUT: "",
+    XCRUN_LOG: fixture.xcrunLogPath
+  };
+
+  const result = spawnSync("/bin/bash", [path.join(__dirname, "../lib/xcdev.sh"), "real", "run"], {
+    env,
+    encoding: "utf8"
+  });
+  const xcrunCommands = fs.existsSync(fixture.xcrunLogPath)
+    ? fs.readFileSync(fixture.xcrunLogPath, "utf8").trim().split("\n")
+    : [];
+
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  return { result, xcrunCommands };
+}
+
 test("parseBuildRunOptions reads simulator version flags", () => {
   assert.deepEqual(
     xcdev.parseBuildRunOptions(["--no-open-simulator", "--version", "18.2", "sim"]),
     {
       positional: ["sim"],
       openSimulator: false,
+      monitorLogs: false,
       simVersion: "18.2",
       scheme: "",
       skipMacroValidation: false
@@ -171,17 +205,28 @@ test("parseBuildRunOptions reads simulator version flags", () => {
     {
       positional: ["qa"],
       openSimulator: true,
+      monitorLogs: false,
       simVersion: "18.3",
       scheme: "",
       skipMacroValidation: false
     }
   );
+
+  assert.deepEqual(xcdev.parseBuildRunOptions(["real", "--logs"]), {
+    positional: ["real"],
+    openSimulator: true,
+    monitorLogs: true,
+    simVersion: "",
+    scheme: "",
+    skipMacroValidation: false
+  });
 });
 
 test("parseBuildRunOptions reads explicit scheme flags", () => {
   assert.deepEqual(xcdev.parseBuildRunOptions(["--scheme", "Rote", "sim"]), {
     positional: ["sim"],
     openSimulator: true,
+    monitorLogs: false,
     simVersion: "",
     scheme: "Rote",
     skipMacroValidation: false
@@ -190,6 +235,7 @@ test("parseBuildRunOptions reads explicit scheme flags", () => {
   assert.deepEqual(xcdev.parseBuildRunOptions(["real", "--scheme=Rote Beta"]), {
     positional: ["real"],
     openSimulator: true,
+    monitorLogs: false,
     simVersion: "",
     scheme: "Rote Beta",
     skipMacroValidation: false
@@ -202,6 +248,7 @@ test("parseBuildRunOptions reads the macro validation opt-out flag", () => {
     {
       positional: ["real"],
       openSimulator: true,
+      monitorLogs: false,
       simVersion: "",
       scheme: "",
       skipMacroValidation: true
@@ -471,6 +518,26 @@ test("explicit scheme override bypasses ambiguous discovery", () => {
   assert.equal(build.result.status, 0, build.result.stderr);
   const schemeIndex = build.args.indexOf("-scheme");
   assert.equal(build.args[schemeIndex + 1], "MainApp");
+});
+
+test("real-device log monitoring launches the app with devicectl console attached", () => {
+  const monitored = runShellReal(true);
+  assert.equal(monitored.result.status, 0, monitored.result.stderr);
+  assert.match(monitored.result.stdout, /streaming its app console logs/);
+  assert.ok(
+    monitored.xcrunCommands.includes(
+      "devicectl device process launch --device REAL-DEVICE-UDID --terminate-existing --console com.example.fixture"
+    )
+  );
+
+  const normal = runShellReal(false);
+  assert.equal(normal.result.status, 0, normal.result.stderr);
+  assert.ok(
+    normal.xcrunCommands.includes(
+      "devicectl device process launch --device REAL-DEVICE-UDID com.example.fixture"
+    )
+  );
+  assert.equal(normal.xcrunCommands.some((command) => command.includes("--console")), false);
 });
 
 test("resolveProfile falls back to simulator defaults and version", () => {

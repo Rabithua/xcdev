@@ -17,7 +17,7 @@ Usage:
   xcdev set real <device-name-pattern>
   xcdev set scheme <scheme-name>
   xcdev build [--scheme <scheme-name>] [--skip-macro-validation] [--version <ios-version>] [profile] [target]
-  xcdev run [--scheme <scheme-name>] [--skip-macro-validation] [--no-open-simulator] [--version <ios-version>] [profile] [target]
+  xcdev run [--logs] [--scheme <scheme-name>] [--skip-macro-validation] [--no-open-simulator] [--version <ios-version>] [profile] [target]
 
 Examples:
   xcdev list devices
@@ -31,10 +31,12 @@ Examples:
   xcdev run --version 18.2 sim
   xcdev run --no-open-simulator sim
   xcdev run real
+  xcdev run --logs real
   xcdev run real "Huawei Air"
   xcdev run "Huawei Air"
 
 Build/run options:
+  --logs                   Stream app console logs for a real-device run.
   --skip-macro-validation  Bypass Xcode validation only for Swift macros you trust.
 
 Config:
@@ -617,6 +619,7 @@ function parseBuildRunArgs(args, config) {
 function parseBuildRunOptions(args) {
   const positional = [];
   let openSimulator = true;
+  let monitorLogs = false;
   let simVersion = "";
   let scheme = "";
   let skipMacroValidation = false;
@@ -625,6 +628,10 @@ function parseBuildRunOptions(args) {
     const arg = args[i];
     if (arg === "--skip-macro-validation") {
       skipMacroValidation = true;
+      continue;
+    }
+    if (arg === "--logs") {
+      monitorLogs = true;
       continue;
     }
     if (arg === "--no-open-simulator") {
@@ -666,7 +673,14 @@ function parseBuildRunOptions(args) {
     positional.push(arg);
   }
 
-  return { positional, openSimulator, simVersion, scheme, skipMacroValidation };
+  return {
+    positional,
+    openSimulator,
+    monitorLogs,
+    simVersion,
+    scheme,
+    skipMacroValidation
+  };
 }
 
 function runBuildOrRun(action, profile, targetOverride, workDir, configPath, config, options = {}) {
@@ -680,6 +694,9 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
   }
   if (mode !== "sim" && finalVersion) {
     throw new Error("--version can only be used with simulator profiles");
+  }
+  if (options.monitorLogs && (action !== "run" || mode !== "real")) {
+    throw new Error("--logs can only be used with `xcdev run` on a real device");
   }
 
   const scriptPath = path.resolve(__dirname, "../lib/xcdev.sh");
@@ -697,6 +714,10 @@ function runBuildOrRun(action, profile, targetOverride, workDir, configPath, con
       : process.env.IOS_SKIP_MACRO_VALIDATION ||
         config.IOS_SKIP_MACRO_VALIDATION ||
         "NO",
+    IOS_MONITOR_LOGS:
+      options.monitorLogs === true
+        ? "YES"
+        : process.env.IOS_MONITOR_LOGS || config.IOS_MONITOR_LOGS || "NO",
     IOS_OPEN_SIMULATOR:
       options.openSimulator === false
         ? "NO"

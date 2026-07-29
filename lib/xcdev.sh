@@ -268,6 +268,7 @@ DEVICE_NAME_PATTERN="${IOS_DEVICE_NAME_PATTERN:-.*}"
 OPEN_SIMULATOR="${IOS_OPEN_SIMULATOR:-YES}"
 CLEAN_BUILD="${IOS_CLEAN_BUILD:-YES}"
 SKIP_MACRO_VALIDATION="${XCDEV_SKIP_MACRO_VALIDATION_OVERRIDE:-${IOS_SKIP_MACRO_VALIDATION:-NO}}"
+MONITOR_LOGS="${IOS_MONITOR_LOGS:-NO}"
 
 MACRO_VALIDATION_ARG=""
 case "$SKIP_MACRO_VALIDATION" in
@@ -607,8 +608,26 @@ run_on_real_device() {
   fi
 
   xcrun devicectl device install app --device "$udid" "$app_path"
-  xcrun devicectl device process launch --device "$udid" "$bundle_id"
-  echo "Run completed on real device ($udid)."
+
+  case "$MONITOR_LOGS" in
+    YES|yes|TRUE|true|1)
+      echo "Launching $bundle_id and streaming its app console logs from the device. Press Ctrl-C to stop."
+      xcrun devicectl device process launch \
+        --device "$udid" \
+        --terminate-existing \
+        --console \
+        "$bundle_id"
+      echo "Log stream ended on real device ($udid)."
+      ;;
+    NO|no|FALSE|false|0)
+      xcrun devicectl device process launch --device "$udid" "$bundle_id"
+      echo "Run completed on real device ($udid)."
+      ;;
+    *)
+      echo "Invalid IOS_MONITOR_LOGS value: $MONITOR_LOGS (expected YES or NO)."
+      exit 1
+      ;;
+  esac
 }
 
 if [[ "$MODE" == "sim" ]]; then
