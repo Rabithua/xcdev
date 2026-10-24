@@ -1,7 +1,7 @@
 {
   "name": "@rabithua/xcdev",
   "version": "1.2.8",
-  "description": "Reusable iOS CLI for listing devices and building/running Xcode projects",
+  "description": "Deprecated local source archive; use xcodebuild and xcrun devicectl directly",
   "license": "MIT",
   "bin": {
     "xcdev": "bin/xcdev.js"
@@ -18,17 +18,13 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check ./bin/xcdev.js && bash -n ./lib/xcdev.sh && node --test && node ./bin/xcdev.js --help",
-    "publish:dry-run": "npm publish --dry-run --access public",
-    "publish:npm": "npm publish --access public",
-    "release:patch": "bash ./scripts/release.sh patch",
-    "release:minor": "bash ./scripts/release.sh minor",
-    "release:major": "bash ./scripts/release.sh major"
+    "check": "node --check ./bin/xcdev.js && bash -n ./lib/xcdev.sh && node --test && node ./bin/xcdev.js --help"
   },
   "keywords": [
     "ios",
     "xcodebuild",
     "simulator",
     "cli"
-  ]
+  ],
+  "private": true
 }
